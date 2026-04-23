@@ -331,6 +331,80 @@
   .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ── Team picker tiles ── */
+  .team-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--surface);
+    gap: 4px;
+  }
+  .team-tile:hover {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    transform: translateY(-1px);
+  }
+  .team-tile.selected {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    box-shadow: 0 0 0 2px rgba(234,88,12,0.15);
+  }
+  .team-tile img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+  }
+  .team-tile .team-name {
+    font-size: 0.65rem;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+  }
+  .team-tile.selected .team-name { color: var(--accent); }
+
+  /* ── User team pick highlighting on draft board ── */
+  .board-row.user-team {
+    background: rgba(234,88,12,0.06);
+    border-left: 3px solid var(--accent);
+    padding-left: 13px;  /* 16px - 3px border */
+  }
+  .board-row.user-team:hover {
+    background: rgba(234,88,12,0.10);
+  }
+  .board-row.user-team.drafted {
+    background: rgba(234,88,12,0.12);
+  }
+  /* Lottery results row highlighting */
+  .lottery-user-row {
+    background: rgba(234,88,12,0.08) !important;
+    border-left: 2px solid var(--accent);
+  }
+
+  /* Current user team indicator in toolbars */
+  .user-team-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--accent-light);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--accent-hover);
+  }
+  .user-team-chip img {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+  }
+
   /* ── Summary / stats strip ── */
   .stats-strip {
     display: flex;
@@ -645,8 +719,11 @@
 
     <div class="toolbar">
       <button id="btn-run-lottery" class="btn primary" onclick="startLottery()">Run Lottery</button>
+      <button id="btn-rerun-lottery" class="btn" onclick="rerunLottery()" style="display:none">🎲 Re-run Lottery</button>
       <button id="btn-reset-lottery" class="btn" onclick="resetLottery()">Reset</button>
       <div class="spacer"></div>
+      <span id="user-team-display-lottery"></span>
+      <button class="btn" onclick="openTeamPicker()">🏀 Select Team</button>
       <button class="btn" onclick="showShare()">Share Link</button>
     </div>
 
@@ -680,6 +757,8 @@
       <button class="btn" onclick="clearAllPicks()">Clear All Picks</button>
       <button class="btn" onclick="autoFillDefaults()">Auto-Fill Default Prospects</button>
       <div class="spacer"></div>
+      <span id="user-team-display-draft"></span>
+      <button class="btn" onclick="openTeamPicker()">🏀 Select Team</button>
       <span id="draft-counter" style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--muted)"></span>
       <button class="btn" onclick="showShare()">Share Link</button>
     </div>
@@ -695,6 +774,27 @@
   </footer>
 
 </div>
+
+<!-- ─── Team Picker Overlay ─── -->
+<div id="team-picker" class="picker-overlay" style="display:none" onclick="if(event.target===this)closeTeamPicker()">
+  <div class="picker-box" style="width:560px">
+    <div class="picker-hdr">
+      <h3>Select Your Team</h3>
+      <button class="x" onclick="closeTeamPicker()">×</button>
+    </div>
+    <div class="picker-search" style="padding:12px 16px">
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:4px">
+        Controlling one team. Your team's picks will be highlighted on the draft board. You can still mock-draft all 30 teams' picks manually.
+      </div>
+    </div>
+    <div class="picker-list" id="team-picker-list" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:12px"></div>
+    <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:space-between">
+      <button class="btn" onclick="clearUserTeam()">Clear Selection (GM Mode)</button>
+      <button class="btn" onclick="closeTeamPicker()">Close</button>
+    </div>
+  </div>
+</div>
+
 
 <!-- ─── Prospect Picker Overlay ─── -->
 <div id="picker" class="picker-overlay" style="display:none" onclick="if(event.target===this)closePicker()">
@@ -803,6 +903,7 @@ let sourceLists = {};           // source name -> [{name, rank}] sorted by that 
 let STATE = {
   phase: 'lottery',             // 'lottery' | 'draft'
   lotteryMode: 'quick',         // 'quick' | 'tv' | 'drawroom'
+  userTeam: null,               // team abbrev (e.g. 'POR') or null (no team selected)
   lotteryResults: null,         // array of { pick, team, originalSlot } after lottery
   pickTransfers: [],            // array of { pick, from, to, label }
   selections: {},               // pickNum -> prospect name
@@ -1169,6 +1270,19 @@ function resetLottery() {
   document.getElementById('lottery-grid').style.display = '';
   saveState();
   renderLottery();
+}
+
+// Re-run lottery: keep user's mode preference but wipe results and start fresh.
+// Same as Reset but immediately starts a new lottery run.
+function rerunLottery() {
+  STATE.lotteryResults = null;
+  STATE.pickTransfers = [];
+  currentPickSlots = JSON.parse(JSON.stringify(originalPickSlots));
+  _tvState = null;
+  _drawRoomState = null;
+  if (_tvTimer) { clearInterval(_tvTimer); _tvTimer = null; }
+  if (_drawTimer) { clearTimeout(_drawTimer); _drawTimer = null; }
+  startLottery();
 }
 
 // ── TV BROADCAST MODE ────────────────────────────────────────────
@@ -1650,23 +1764,30 @@ function renderLottery() {
   let html = '<table><thead><tr><th>Seed</th><th>Team</th><th>Odds #1</th></tr></thead><tbody>';
   preLotteryOrder.forEach((team, i) => {
     const odds = LOTTERY_ODDS[i] ? (LOTTERY_ODDS[i] / 10).toFixed(1) + '%' : '—';
-    html += `<tr><td>${i+1}</td><td>${teamBadge(team)}</td><td>${odds}</td></tr>`;
+    const isUserTeam = STATE.userTeam === team;
+    html += `<tr class="${isUserTeam ? 'lottery-user-row' : ''}"><td>${i+1}</td><td>${teamBadge(team)}</td><td>${odds}</td></tr>`;
   });
   html += '</tbody></table>';
   preEl.innerHTML = html;
 
   // Lottery results
   const resEl = document.getElementById('lottery-results-table');
+  const runBtn = document.getElementById('btn-run-lottery');
+  const rerunBtn = document.getElementById('btn-rerun-lottery');
+  const resetBtn = document.getElementById('btn-reset-lottery');
   if (!STATE.lotteryResults) {
     resEl.innerHTML = '<div class="empty-state"><b>No lottery run yet</b>Click "Run Lottery" to simulate the draft order.</div>';
-    document.getElementById('btn-reset-lottery').disabled = true;
+    runBtn.style.display = '';
+    rerunBtn.style.display = 'none';
+    resetBtn.disabled = true;
   } else {
     let rhtml = '<table><thead><tr><th>Pick</th><th>Seed</th><th>Team</th></tr></thead><tbody>';
     for (const r of STATE.lotteryResults) {
       const current = currentPickSlots[r.pick];
       const finalTeam = current ? current.team : r.team;
       const changed = finalTeam !== r.team;
-      rhtml += `<tr>
+      const isUserTeam = STATE.userTeam && (r.team === STATE.userTeam || finalTeam === STATE.userTeam);
+      rhtml += `<tr class="${isUserTeam ? 'lottery-user-row' : ''}">
         <td><span class="pick-num">#${r.pick}</span></td>
         <td>${r.originalSlot}</td>
         <td>${teamBadge(r.team)}${changed ? ' <span class="transfer-arrow">→</span> ' + teamBadge(finalTeam) : ''}</td>
@@ -1674,7 +1795,9 @@ function renderLottery() {
     }
     rhtml += '</tbody></table>';
     resEl.innerHTML = rhtml;
-    document.getElementById('btn-reset-lottery').disabled = false;
+    runBtn.style.display = 'none';
+    rerunBtn.style.display = '';
+    resetBtn.disabled = false;
   }
 
   // Transfers panel
@@ -1733,7 +1856,7 @@ function renderDraftBoard() {
     const isEmpty = !prospect;
     const bio = prospect ? prospectBio(prospect) : '';
 
-    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'}" onclick="openPicker(${p})">
+    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${STATE.userTeam && slot.team === STATE.userTeam ? 'user-team' : ''}" onclick="openPicker(${p})">
       <div class="pick-col">#${p}</div>
       <div class="team-col">${teamBadge(slot.team)}</div>
       <div class="prospect-col">
@@ -1749,6 +1872,85 @@ function renderDraftBoard() {
 function escapeHtml(s) {
   return (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  TEAM PICKER (user selects their team for perspective-based view)
+// ═══════════════════════════════════════════════════════════════════
+
+// All 30 NBA team abbrevs alphabetically by full city name
+const ALL_NBA_TEAMS = [
+  'ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GSW',
+  'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NOP', 'NYK',
+  'OKC', 'ORL', 'PHI', 'PHX', 'POR', 'SAC', 'SAS', 'TOR', 'UTA', 'WAS',
+];
+// Full team city names for sorting
+const TEAM_FULL_NAME = {
+  ATL: 'Atlanta Hawks', BOS: 'Boston Celtics', BKN: 'Brooklyn Nets', CHA: 'Charlotte Hornets',
+  CHI: 'Chicago Bulls', CLE: 'Cleveland Cavaliers', DAL: 'Dallas Mavericks', DEN: 'Denver Nuggets',
+  DET: 'Detroit Pistons', GSW: 'Golden State Warriors', HOU: 'Houston Rockets', IND: 'Indiana Pacers',
+  LAC: 'LA Clippers', LAL: 'LA Lakers', MEM: 'Memphis Grizzlies', MIA: 'Miami Heat',
+  MIL: 'Milwaukee Bucks', MIN: 'Minnesota Timberwolves', NOP: 'New Orleans Pelicans', NYK: 'New York Knicks',
+  OKC: 'Oklahoma City Thunder', ORL: 'Orlando Magic', PHI: 'Philadelphia 76ers', PHX: 'Phoenix Suns',
+  POR: 'Portland Trail Blazers', SAC: 'Sacramento Kings', SAS: 'San Antonio Spurs',
+  TOR: 'Toronto Raptors', UTA: 'Utah Jazz', WAS: 'Washington Wizards',
+};
+
+function openTeamPicker() {
+  renderTeamPickerList();
+  document.getElementById('team-picker').style.display = 'flex';
+}
+
+function closeTeamPicker() {
+  document.getElementById('team-picker').style.display = 'none';
+}
+
+function renderTeamPickerList() {
+  // Sort alphabetically by full team name
+  const sorted = [...ALL_NBA_TEAMS].sort((a, b) =>
+    (TEAM_FULL_NAME[a] || a).localeCompare(TEAM_FULL_NAME[b] || b)
+  );
+  const list = document.getElementById('team-picker-list');
+  let html = '';
+  for (const abbrev of sorted) {
+    const logo = teamLogoURL(abbrev);
+    const isSelected = STATE.userTeam === abbrev;
+    const fullName = TEAM_FULL_NAME[abbrev] || abbrev;
+    html += `<div class="team-tile ${isSelected ? 'selected' : ''}" onclick="selectUserTeam('${abbrev}')" title="${fullName}">
+      ${logo ? `<img src="${logo}" alt="${abbrev}" onerror="this.style.display='none'">` : ''}
+      <span class="team-name">${abbrev}</span>
+    </div>`;
+  }
+  list.innerHTML = html;
+}
+
+function selectUserTeam(abbrev) {
+  STATE.userTeam = abbrev;
+  closeTeamPicker();
+  saveState();
+  updateUserTeamDisplay();
+  if (STATE.phase === 'lottery') renderLottery();
+  else renderDraftBoard();
+}
+
+function clearUserTeam() {
+  STATE.userTeam = null;
+  closeTeamPicker();
+  saveState();
+  updateUserTeamDisplay();
+  if (STATE.phase === 'lottery') renderLottery();
+  else renderDraftBoard();
+}
+
+function updateUserTeamDisplay() {
+  const label = STATE.userTeam
+    ? `<span class="user-team-chip">${teamLogoOnly(STATE.userTeam, 20)}<span>${TEAM_FULL_NAME[STATE.userTeam] || STATE.userTeam}</span></span>`
+    : '';
+  const el1 = document.getElementById('user-team-display-lottery');
+  const el2 = document.getElementById('user-team-display-draft');
+  if (el1) el1.innerHTML = label;
+  if (el2) el2.innerHTML = label;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  PROSPECT PICKER
@@ -1869,6 +2071,7 @@ function setPhase(phase) {
   } else {
     renderDraftBoard();
   }
+  updateUserTeamDisplay();
   saveState();
 }
 
@@ -1885,22 +2088,19 @@ function encodeState() {
     p: STATE.phase === 'draft' ? 1 : 0,
     m: STATE.lotteryMode === 'tv' ? 1 : (STATE.lotteryMode === 'drawroom' ? 2 : 0),
   };
+  if (STATE.userTeam) compact.t = STATE.userTeam;
   if (STATE.lotteryResults) {
-    // Store only lottery winners (picks 1-4) + implicit ordering for 5-14
-    // Actually store all 14 as [team, originalSlot] pairs for simplicity
     compact.l = STATE.lotteryResults.map(r => [r.team, r.originalSlot]);
   }
-  // Selections encoded as { pick: prospectIndex } for compactness
   const sels = {};
   for (const [pick, name] of Object.entries(STATE.selections || {})) {
     if (!name) continue;
     const idx = allProspects.indexOf(name);
-    sels[pick] = idx >= 0 ? idx : name;  // fall back to name if not found
+    sels[pick] = idx >= 0 ? idx : name;
   }
   if (Object.keys(sels).length) compact.s = sels;
 
   const json = JSON.stringify(compact);
-  // base64url encode
   const b64 = btoa(unescape(encodeURIComponent(json)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return b64;
@@ -1915,6 +2115,7 @@ function decodeState(encoded) {
 
     STATE.phase = compact.p === 1 ? 'draft' : 'lottery';
     STATE.lotteryMode = compact.m === 1 ? 'tv' : (compact.m === 2 ? 'drawroom' : 'quick');
+    STATE.userTeam = compact.t || null;
     if (compact.l) {
       STATE.lotteryResults = compact.l.map(([team, orig], i) => ({
         pick: i + 1, team, originalSlot: orig
@@ -1982,6 +2183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && _pickerSlot !== null) closePicker();
+    if (e.key === 'Escape' && document.getElementById('team-picker').style.display === 'flex') closeTeamPicker();
   });
 
   try {
@@ -1990,6 +2192,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadStateFromURL();
     document.getElementById('status').style.display = 'none';
     setPhase(STATE.phase);
+    updateUserTeamDisplay();
   } catch (e) {
     document.getElementById('status').innerHTML =
       `<b style="color:var(--red)">Failed to load:</b> ${escapeHtml(e.message)}<br>` +
