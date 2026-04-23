@@ -1,1049 +1,1052 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Draft Simulator · HoopsMatic</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root {
-    --bg: #fafaf9;
-    --surface: #ffffff;
-    --border: #e7e5e4;
-    --border-strong: #d6d3d1;
-    --text: #1c1917;
-    --muted: #57534e;
-    --dim: #a8a29e;
-    --accent: #ea580c;
-    --accent-hover: #c2410c;
-    --accent-light: #fff7ed;
-    --orange: #c2410c;
-    --green: #16a34a;
-    --red: #dc2626;
-    --hover: #fafaf9;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: 0;
-    font-family: 'DM Sans', -apple-system, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  .container { max-width: 1400px; margin: 0 auto; padding: 24px 20px; }
-  header { margin-bottom: 20px; }
-  h1 {
-    font-size: 1.75rem;
-    font-weight: 700;
-    margin: 0 0 4px 0;
-    letter-spacing: -0.02em;
-  }
-  .subtitle { color: var(--muted); font-size: 0.95rem; margin: 0; }
+// ============================================================
+// HoopsMatic — Cloudflare Worker v5.5 (hoopsmatic.com)
+// + Draft Simulator route (/draft-simulator) — standalone RM-Lite draft app
+// Prior: v5.4 Security hardened, Depth Charts, OG tags, health check
+//        + RM API endpoints (server-side Sheets proxy)
+//        + /roster/:team/:phase deep-link routing
+//        + Defense: RS / Playoffs multi-phase tabs
+// ============================================================
 
-  /* ── Phase tabs ── */
-  .phase-nav {
-    display: flex;
-    gap: 4px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 4px;
-    margin-bottom: 16px;
-    width: fit-content;
-  }
-  .phase-tab {
-    padding: 8px 16px;
-    border: none;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.85rem;
-    font-weight: 600;
-    border-radius: 6px;
-    transition: all 0.15s;
-  }
-  .phase-tab:hover { background: var(--accent-light); color: var(--orange); }
-  .phase-tab.active { background: var(--accent); color: white; }
-  .phase-tab.done { color: var(--green); }
+const RM_URL = 'https://aderoa.github.io/RosterManager/';
+const RM_HTML_URL = 'https://raw.githubusercontent.com/aderoa/RosterManager/main/index.html';
+const COMPARE_HTML_URL = 'https://raw.githubusercontent.com/jsierrahoopshype/nba-player-data/main/nba-player-comparison-tool.html';
+const SEASON_COMPARE_HTML_URL = 'https://raw.githubusercontent.com/jsierrahoopshype/nba-player-data/main/nba-season-comparison-tool.html';
+const TM_HTML_URL = 'https://raw.githubusercontent.com/jsierrahoopshype/TransactionMaster/main/index.html';
+const CONTRACTS_HTML_URL = 'https://raw.githubusercontent.com/jsierrahoopshype/Contracts/main/index.html';
+const INJURIES_HTML_URL = 'https://raw.githubusercontent.com/aderoa/Injuries/main/index.html';
+const DEPTH_HTML_URL = 'https://raw.githubusercontent.com/aderoa/DepthCharts/main/index.html';
+const DEFENSE_HTML_URL = 'https://raw.githubusercontent.com/aderoa/DefensiveRankings/main/index.html';
+const RV_HTML_URL = 'https://raw.githubusercontent.com/aderoa/RealValue/main/index.html';
+const ANALYTICS_HTML_URL = 'https://raw.githubusercontent.com/aderoa/RealValue/main/analytics.html';
+const DRAFT_HTML_URL = 'https://raw.githubusercontent.com/aderoa/DraftPredictor/main/index.html';
+const DRAFT_SIM_HTML_URL = 'https://raw.githubusercontent.com/aderoa/DraftSimulator/main/index.html';
+const SSF_HTML_URL = 'https://raw.githubusercontent.com/jsierrahoopshype/salary-season-finder/main/index.html';
+const SSF_BASE = 'https://jsierrahoopshype.github.io/salary-season-finder/';
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSg6im6IYB6HXMGzQbmmBnLw9SfQLzxCSo8OfChxlJLhsB6BBCO0wPF_TMch0YgAbtFqYkwDWrsxRe7/pub?gid=0&single=true&output=csv';
 
-  /* ── Toolbar ── */
-  .toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: center;
-    margin-bottom: 16px;
-    padding: 12px 16px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-  }
-  .toolbar .spacer { flex: 1; }
-  .btn {
-    padding: 8px 14px;
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--text);
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.85rem;
-    font-weight: 600;
-    transition: all 0.15s;
-  }
-  .btn:hover { background: var(--accent-light); color: var(--accent-hover); border-color: var(--accent); }
-  .btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
-  .btn.primary:hover { background: var(--accent-hover); }
-  .btn.danger { background: var(--surface); color: var(--red); border-color: var(--red); }
-  .btn.danger:hover { background: #fef2f2; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn.small { padding: 5px 10px; font-size: 0.75rem; }
+// ── Sheets API v4 — key from env secret, fallback for migration ──
+const MAIN_SHEET = '11llk0icQqoi0JwJXat5KO8y2RQeBMN5rS9FhAY56Idc';
+const INJ_SHEET = '14TQPdQ9mDhHMMMQa5vcs0coL98ZloHORtYElDikKoWY';
+const DEF_SHEET = '1JH2FUBIyQ1zEHzZBxgP8vHBZ7d8EtP5-fSVG3zMgCgg';
+const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 
-  /* ── Panels ── */
-  .panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    margin-bottom: 16px;
-    overflow: hidden;
-  }
-  .panel-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
-    font-weight: 600;
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-  }
-  .panel-body { padding: 16px; }
-
-  /* ── Tables ── */
-  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  th { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: var(--bg); }
-  td { font-family: 'JetBrains Mono', monospace; }
-  td.player-cell { font-family: 'DM Sans', sans-serif; font-weight: 500; }
-  tr:hover td { background: var(--hover); }
-
-  .pick-num { font-weight: 700; color: var(--orange); min-width: 32px; display: inline-block; }
-  .team-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    font-size: 0.75rem;
-    color: white;
-    min-width: 42px;
-  }
-  .transfer-arrow {
-    color: var(--dim);
-    font-size: 0.8rem;
-    padding: 0 6px;
-  }
-  .transfer-note {
-    font-size: 0.7rem;
-    color: var(--muted);
-    font-style: italic;
-    margin-left: 6px;
-  }
-
-  /* ── Lottery panel ── */
-  .lottery-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-  @media (max-width: 900px) { .lottery-grid { grid-template-columns: 1fr; } }
-
-  .empty-state {
-    padding: 40px 20px;
-    text-align: center;
-    color: var(--dim);
-    font-size: 0.9rem;
-  }
-  .empty-state b { color: var(--muted); display: block; margin-bottom: 8px; }
-
-  /* ── Draft board ── */
-  .board-round-header {
-    background: var(--bg);
-    padding: 10px 16px;
-    font-weight: 700;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    border-bottom: 1px solid var(--border);
-  }
-  .board-row {
-    display: grid;
-    grid-template-columns: 48px 64px 1fr auto;
-    gap: 10px;
-    align-items: center;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-  .board-row:hover { background: var(--hover); }
-  .board-row.drafted { background: #fffbeb; }
-  .board-row.drafted:hover { background: #fef3c7; }
-  .board-row .pick-col { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--orange); }
-  .board-row .team-col { display: flex; align-items: center; gap: 4px; }
-  .board-row .prospect-col { display: flex; flex-direction: column; min-width: 0; }
-  .board-row .prospect-name {
-    font-weight: 600;
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .board-row .prospect-bio {
-    font-size: 0.7rem;
-    color: var(--dim);
-    font-family: 'JetBrains Mono', monospace;
-    margin-top: 2px;
-  }
-  .board-row.empty .prospect-name { color: var(--dim); font-style: italic; font-weight: 400; }
-  .board-row .clear-btn {
-    border: none;
-    background: transparent;
-    color: var(--dim);
-    cursor: pointer;
-    font-size: 0.9rem;
-    padding: 4px 8px;
-    border-radius: 4px;
-  }
-  .board-row .clear-btn:hover { background: var(--red); color: white; }
-
-  /* ── Prospect picker overlay ── */
-  .picker-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.5);
-    backdrop-filter: blur(3px);
-    z-index: 200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .picker-box {
-    background: var(--surface);
-    border-radius: 12px;
-    width: 500px;
-    max-width: 90vw;
-    max-height: 80vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-  }
-  .picker-hdr {
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .picker-hdr h3 { margin: 0; flex: 1; font-size: 0.95rem; color: var(--orange); }
-  .picker-hdr .x { background: none; border: none; font-size: 1.2rem; color: var(--muted); cursor: pointer; padding: 4px 8px; }
-  .picker-hdr .x:hover { color: var(--red); }
-  .picker-search { padding: 10px 16px; border-bottom: 1px solid var(--border); }
-  .picker-search input {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
-    font-family: inherit;
-    font-size: 0.85rem;
-    outline: none;
-  }
-  .picker-search input:focus { border-color: var(--accent); }
-  .picker-list { flex: 1; overflow-y: auto; padding: 8px; }
-  .picker-item {
-    display: grid;
-    grid-template-columns: 40px 1fr auto;
-    gap: 10px;
-    padding: 8px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    align-items: center;
-  }
-  .picker-item:hover { background: var(--hover); }
-  .picker-item.current { background: var(--accent-light); border: 1px solid rgba(234,88,12,0.3); }
-  .picker-item.taken { opacity: 0.4; cursor: not-allowed; }
-  .picker-item .rnk { color: var(--dim); font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; }
-  .picker-item .name { font-weight: 600; }
-  .picker-item .bio { color: var(--dim); font-size: 0.7rem; }
-  .picker-item .taken-badge { font-size: 0.65rem; color: var(--muted); background: var(--bg); padding: 2px 6px; border-radius: 3px; }
-
-  /* ── Share dialog ── */
-  .share-box {
-    background: var(--accent-light);
-    border: 1px solid var(--accent);
-    padding: 12px 16px;
-    border-radius: 8px;
-    display: none;
-    margin-bottom: 16px;
-  }
-  .share-box.visible { display: block; }
-  .share-box .share-url {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.75rem;
-    background: var(--surface);
-    color: var(--text);
-    margin-top: 6px;
-  }
-
-  .status { padding: 40px; text-align: center; color: var(--muted); }
-  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* ── Summary / stats strip ── */
-  .stats-strip {
-    display: flex;
-    gap: 24px;
-    font-size: 0.8rem;
-    color: var(--muted);
-    padding: 8px 16px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-  }
-  .stats-strip b { color: var(--text); font-weight: 600; }
-
-  footer {
-    margin-top: 24px;
-    padding: 16px 0;
-    text-align: center;
-    font-size: 0.75rem;
-    color: var(--dim);
-  }
-  footer a { color: var(--muted); text-decoration: none; }
-  footer a:hover { color: var(--orange); }
-
-  @media (max-width: 720px) {
-    .container { padding: 12px; }
-    h1 { font-size: 1.3rem; }
-    .toolbar { padding: 10px; gap: 6px; }
-    .btn { padding: 7px 10px; font-size: 0.8rem; }
-    .board-row { grid-template-columns: 40px 56px 1fr auto; padding: 8px 10px; }
-    th, td { padding: 6px 8px; font-size: 0.78rem; }
-  }
-</style>
-</head>
-<body>
-
-<div class="container">
-
-  <header>
-    <h1>Draft Simulator</h1>
-    <p class="subtitle">Lottery, draft board, shareable mock drafts. <strong>Phase 1 preview</strong> · trades coming soon.</p>
-  </header>
-
-  <div class="phase-nav">
-    <button class="phase-tab active" data-phase="lottery">1. Lottery</button>
-    <button class="phase-tab" data-phase="draft">2. Draft Board</button>
-  </div>
-
-  <div id="share-box" class="share-box">
-    <div><b>Share this mock draft:</b> <button class="btn small" onclick="hideShare()">Close</button></div>
-    <input type="text" class="share-url" id="share-url-field" readonly>
-  </div>
-
-  <div id="status" class="status"><span class="spinner"></span>Loading draft data…</div>
-
-  <!-- ─── LOTTERY PHASE ─── -->
-  <div id="phase-lottery" style="display:none">
-
-    <div class="toolbar">
-      <button id="btn-run-lottery" class="btn primary" onclick="runLottery()">🎱 Run Lottery</button>
-      <button id="btn-reset-lottery" class="btn" onclick="resetLottery()">Reset</button>
-      <div class="spacer"></div>
-      <button class="btn" onclick="showShare()">Share Link</button>
-    </div>
-
-    <div class="lottery-grid">
-      <div class="panel">
-        <div class="panel-header">Pre-Lottery Standings (Worst → Best)</div>
-        <div id="pre-lottery-table"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-header">Lottery Results</div>
-        <div id="lottery-results-table"></div>
-      </div>
-    </div>
-
-    <div id="transfers-panel" class="panel" style="display:none">
-      <div class="panel-header">Pick Protections & Transfers</div>
-      <div id="transfers-list" class="panel-body"></div>
-    </div>
-  </div>
-
-  <!-- ─── DRAFT BOARD PHASE ─── -->
-  <div id="phase-draft" style="display:none">
-
-    <div class="toolbar">
-      <button class="btn" onclick="clearAllPicks()">Clear All Picks</button>
-      <button class="btn" onclick="autoFillDefaults()">Auto-Fill Default Prospects</button>
-      <div class="spacer"></div>
-      <span id="draft-counter" style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--muted)"></span>
-      <button class="btn" onclick="showShare()">Share Link</button>
-    </div>
-
-    <div class="panel">
-      <div class="stats-strip" id="draft-stats"></div>
-      <div id="draft-board"></div>
-    </div>
-  </div>
-
-  <footer>
-    Powered by <a href="https://hoopsmatic.com">HoopsMatic</a> · Data from Draft Predictor sheet via <code>/api/rm-draft</code>
-  </footer>
-
-</div>
-
-<!-- ─── Prospect Picker Overlay ─── -->
-<div id="picker" class="picker-overlay" style="display:none" onclick="if(event.target===this)closePicker()">
-  <div class="picker-box">
-    <div class="picker-hdr">
-      <h3 id="picker-title">Select Prospect</h3>
-      <button class="x" onclick="closePicker()">×</button>
-    </div>
-    <div class="picker-search">
-      <input type="text" id="picker-search" placeholder="Search prospects..." oninput="renderPicker(this.value)" autofocus>
-    </div>
-    <div class="picker-list" id="picker-list"></div>
-  </div>
-</div>
-
-
-<script>
-// ═══════════════════════════════════════════════════════════════════
-//  CONSTANTS (mirror RosterManager.html)
-// ═══════════════════════════════════════════════════════════════════
-
-const DATA_URL = 'https://hoopsmatic.com/api/rm-draft';
-
-const LOTTERY_ODDS = [140, 140, 140, 125, 105, 90, 75, 60, 45, 30, 20, 15, 10, 5];
-
-const PICK_PROTECTIONS = [
-  { from: 'WAS', to: 'NYK', condition: p => p > 8, label: 'WAS pick not top 8 → NYK' },
-  { from: 'IND', to: 'LAC', condition: p => p >= 4 && p <= 9, label: 'IND pick 4-9 → LAC' },
-  { from: 'UTA', to: 'OKC', condition: p => p > 8, label: 'UTA pick not top 8 → OKC' },
-  { from: 'PHI', to: 'OKC', condition: p => p > 4, label: 'PHI pick not top 4 → OKC' },
-  { from: 'ORL', to: 'MEM', condition: () => true, label: 'ORL pick → MEM (unprotected)' },
-];
-
-const TEAMS = {
-  'Atlanta':'ATL','Boston':'BOS','Brooklyn':'BKN','Charlotte':'CHA','Chicago':'CHI',
-  'Cleveland':'CLE','Dallas':'DAL','Denver':'DEN','Detroit':'DET','Golden State':'GSW',
-  'Houston':'HOU','Indiana':'IND','LA Clippers':'LAC','LA Lakers':'LAL','Memphis':'MEM',
-  'Miami':'MIA','Milwaukee':'MIL','Minnesota':'MIN','New Orleans':'NOP','New York':'NYK',
-  'Oklahoma City':'OKC','Orlando':'ORL','Philadelphia':'PHI','Phoenix':'PHX','Portland':'POR',
-  'Sacramento':'SAC','San Antonio':'SAS','Toronto':'TOR','Utah':'UTA','Washington':'WAS'
-};
-
-const TEAM_COLORS = {
-  ATL:['#E03A3E','#C1D32F'],BOS:['#007A33','#BA9653'],BKN:['#000000','#FFFFFF'],
-  CHA:['#1D1160','#00788C'],CHI:['#CE1141','#000000'],CLE:['#860038','#FDBB30'],
-  DAL:['#00538C','#002B5E'],DEN:['#0E2240','#FEC524'],DET:['#C8102E','#1D42BA'],
-  GSW:['#1D428A','#FFC72C'],HOU:['#CE1141','#000000'],IND:['#002D62','#FDBB30'],
-  LAC:['#C8102E','#1D428A'],LAL:['#552583','#FDB927'],MEM:['#5D76A9','#12173F'],
-  MIA:['#98002E','#F9A01B'],MIL:['#00471B','#EEE1C6'],MIN:['#0C2340','#236192'],
-  NOP:['#0C2340','#C8102E'],NYK:['#006BB6','#F58426'],OKC:['#007AC1','#EF6100'],
-  ORL:['#0077C0','#C4CED4'],PHI:['#006BB6','#ED174C'],PHX:['#1D1160','#E56020'],
-  POR:['#E03A3E','#000000'],SAC:['#5A2D81','#63727A'],SAS:['#C4CED4','#000000'],
-  TOR:['#CE1141','#000000'],UTA:['#002B5C','#F9A01B'],WAS:['#002B5C','#E31837']
-};
-
-// ═══════════════════════════════════════════════════════════════════
-//  STATE
-// ═══════════════════════════════════════════════════════════════════
-
-let allProspects = [];          // array of prospect names (sorted by default sheet order)
-let originalPickSlots = {};     // pickNum -> { team, defaultProspect } — from data source, immutable
-let currentPickSlots = {};      // pickNum -> { team, defaultProspect } — after lottery + protections
-let prospectBioMap = {};        // name -> { birthDate, country, position, preDraftTeam }
-let preLotteryOrder = [];       // team abbrevs in standings rank order (worst to best)
-
-// Persistent mock-draft state (encoded in URL)
-let STATE = {
-  phase: 'lottery',             // 'lottery' | 'draft'
-  lotteryResults: null,         // array of { pick, team, originalSlot } after lottery
-  pickTransfers: [],            // array of { pick, from, to, label }
-  selections: {},               // pickNum -> prospect name
-};
-
-let _pickerSlot = null;         // which slot is currently being selected
-
-// ═══════════════════════════════════════════════════════════════════
-//  CSV PARSING
-// ═══════════════════════════════════════════════════════════════════
-
-function parseCSV(text) {
-  const rows = [];
-  let cur = [''], inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"' && text[i+1] === '"') { cur[cur.length-1] += '"'; i++; }
-      else if (c === '"') inQ = false;
-      else cur[cur.length-1] += c;
-    } else {
-      if (c === '"') inQ = true;
-      else if (c === ',') cur.push('');
-      else if (c === '\n') { rows.push(cur); cur = ['']; }
-      else if (c !== '\r') cur[cur.length-1] += c;
-    }
-  }
-  if (cur.length > 1 || cur[0]) rows.push(cur);
-  return rows;
+function getApiKey(env) {
+  return (env && env.SHEETS_API_KEY) || 'AIzaSyB9g7c6llswswuZQ2I5y2MwGk6BzYEtHsY';
+}
+function sheetsURL(sheetId, tab, env) {
+  return `${SHEETS_API}/${sheetId}/values/${encodeURIComponent(tab)}?key=${getApiKey(env)}`;
+}
+function sheetsJsonToCsv(json) {
+  const vals = json.values || [];
+  return vals.map(row =>
+    row.map(c => c != null && (String(c).includes(',') || String(c).includes('"') || String(c).includes('\n'))
+      ? '"' + String(c).replace(/"/g, '""') + '"' : (c || '')
+    ).join(',')
+  ).join('\n');
+}
+async function fetchSheetAsCsv(sheetId, tab, env) {
+  const resp = await fetch(sheetsURL(sheetId, tab, env), { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!resp.ok) return null;
+  return sheetsJsonToCsv(await resp.json());
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  DATA LOADING — mirrors RM's fetchDraftPicks()
-// ═══════════════════════════════════════════════════════════════════
+const ALLOWED_ORIGINS = ['https://jsierrahoopshype.github.io','https://aderoa.github.io','https://hoopsmatic.com','http://localhost','http://127.0.0.1'];
 
-async function loadData() {
-  const r = await fetch(DATA_URL);
-  if (!r.ok) throw new Error('API error ' + r.status);
-  const text = await r.text();
-  if (text.startsWith('<!') || text.startsWith('<html')) {
-    throw new Error('Got HTML instead of CSV from /api/rm-draft');
-  }
-  const rows = parseCSV(text);
+// ── Security helpers ──
+function safeError(msg, status = 500, extra = {}) {
+  return new Response(JSON.stringify({ error: msg }), { status, headers: { 'Content-Type': 'application/json', ...extra } });
+}
+function getAllowedOrigin(req) {
+  const o = req.headers.get('Origin') || '', r = req.headers.get('Referer') || '';
+  return ALLOWED_ORIGINS.find(a => o.startsWith(a)) || (r.startsWith('https://hoopsmatic.com') ? 'https://hoopsmatic.com' : null);
+}
 
-  const prospects = [];
-  const pickSlots = {};
+const HTML_HEADERS = {
+  'Content-Type': 'text/html;charset=UTF-8',
+  'Cache-Control': 'no-cache, no-transform',
+  'Access-Control-Allow-Origin': '*',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Content-Security-Policy': "default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src * data:; connect-src 'self' https://sheets.googleapis.com https://*.googleusercontent.com https://raw.githubusercontent.com https://cdn.nba.com https://hoopsmatic.com https://docs.google.com https://flagcdn.com https://aderoa.github.io https://api.github.com https://hoopshype-rumors-api.thejorgesierra.workers.dev;",
+  'X-HoopsMatic-Worker': 'v5.5',
+};
 
-  const NATIONALITY_TO_COUNTRY = {
-    'Italian':'Italy','French':'France','Spanish':'Spain','German':'Germany','Australian':'Australia',
-    'Canadian':'Canada','Brazilian':'Brazil','Serbian':'Serbia','Croatian':'Croatia','Greek':'Greece',
-    'Turkish':'Turkey','Slovenian':'Slovenia','Lithuanian':'Lithuania','Latvian':'Latvia','Nigerian':'Nigeria',
-    'Cameroonian':'Cameroon','Congolese':'DR Congo','Senegalese':'Senegal','Malian':'Mali','Montenegrin':'Montenegro',
-    'Bosnian':'Bosnia','Georgian':'Georgia','Israeli':'Israel','Japanese':'Japan','Chinese':'China',
-    'South Sudanese':'South Sudan','Dominican':'Dominican Republic','Puerto Rican':'Puerto Rico','Bahamian':'Bahamas',
-    'Jamaican':'Jamaica','British':'United Kingdom','Finnish':'Finland','Swedish':'Sweden','Norwegian':'Norway',
-    'Danish':'Denmark','Belgian':'Belgium','Dutch':'Netherlands','Swiss':'Switzerland','Austrian':'Austria',
-    'Polish':'Poland','Czech':'Czech Republic','Portuguese':'Portugal','Argentine':'Argentina','Colombian':'Colombia',
-    'Mexican':'Mexico','New Zealander':'New Zealand','Filipino':'Philippines','Korean':'South Korea','Taiwanese':'Taiwan'
+// ── OG meta tags ──
+const OG_META = {
+  trade:     { title: 'HoopsMatic Trade Machine',      desc: 'NBA trade simulator with real salary cap rules, exceptions, and CBA compliance.' },
+  roster:    { title: 'HoopsMatic Roster Manager',     desc: 'NBA offseason simulator — manage your team through the draft, free agency, and trades.' },
+  compare:   { title: 'HoopsMatic Compare Players',    desc: 'Compare any two NBA players across 140+ categories including awards, stats, salaries, and more.' },
+  seasons:   { title: 'HoopsMatic Compare Seasons',    desc: 'Compare any two NBA player seasons side-by-side with stats, advanced metrics, and more.' },
+  salary:    { title: 'HoopsMatic Salary Finder',      desc: 'Search and compare NBA player salaries across seasons.' },
+  contracts: { title: 'HoopsMatic Contracts',           desc: 'Complete NBA contract database with salary breakdowns, options, and cap holds.' },
+  defense:   { title: 'HoopsMatic Defensive Rankings',  desc: 'Archetype-weighted NBA defensive player rankings with multi-period analysis.' },
+  injuries:  { title: 'HoopsMatic Injury Report',       desc: 'Real-time NBA injury report with salary impact analysis.' },
+  draft:     { title: 'HoopsMatic Draft Predictor',     desc: 'NBA mock draft with aggregate consensus rankings.' },
+  draftsim:  { title: 'HoopsMatic Draft Simulator',     desc: 'Simulate the NBA draft lottery and mock the entire draft board with shareable results.' },
+  depth:     { title: 'HoopsMatic Depth Charts',        desc: 'Interactive NBA team depth charts with injury integration.' },
+};
+function injectOG(html, key) {
+  const og = OG_META[key]; if (!og) return html;
+  return html.replace('</head>', `<meta property="og:title" content="${og.title}"><meta property="og:description" content="${og.desc}"><meta property="og:type" content="website"><meta property="og:site_name" content="HoopsMatic"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="${og.title}"><meta name="twitter:description" content="${og.desc}"><meta name="description" content="${og.desc}">\n</head>`);
+}
+
+// ── Nav bar ──
+function navBar(activePage) {
+  const BASE = 'https://hoopsmatic.com';
+  const items = [
+    { id: 'trade', label: 'Trade Machine', href: BASE + '/' },
+    { id: 'roster', label: 'Roster Manager', href: BASE + '/roster' },
+    { id: 'salary', label: 'Salary Finder', href: BASE + '/salary-season-finder' },
+    { id: 'contracts', label: 'Contracts', href: BASE + '/contracts' },
+    { id: 'compare', label: 'Compare Players', href: BASE + '/compare' },
+    { id: 'seasons', label: 'Compare Seasons', href: BASE + '/compare-seasons' },
+    { id: 'depth', label: 'Depth Charts', href: BASE + '/depth-charts' },
+    { id: 'defense', label: 'Defensive Rankings', href: BASE + '/defense' },
+    { id: 'realvalue', label: 'Real Value', href: BASE + '/real-value' },
+    { id: 'injuries', label: 'Injuries', href: BASE + '/injuries' },
+    { id: 'draft', label: 'Draft Predictor', href: BASE + '/draft' },
+    { id: 'draftsim', label: 'Draft Simulator', href: BASE + '/draft-simulator' },
+  ];
+  const links = items.map(it => `<a href="${it.href}" class="hm-nav-link${it.id===activePage?' hm-nav-active':''}">${it.label}</a>`).join('');
+  const logo = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:inline-block;vertical-align:middle;margin-right:6px;flex-shrink:0"><circle cx="10" cy="10" r="10" fill="#E8531A"/><path d="M10 0C10 0 10 20 10 20" stroke="#7A2800" stroke-width="1.2"/><path d="M0 10C0 10 20 10 20 10" stroke="#7A2800" stroke-width="1.2"/><path d="M2.9 3.5C2.9 3.5 10 9.5 10 10C10 10.5 17.1 16.5 17.1 16.5" stroke="#7A2800" stroke-width="1.2"/><path d="M17.1 3.5C17.1 3.5 10 9.5 10 10C10 10.5 2.9 16.5 2.9 16.5" stroke="#7A2800" stroke-width="1.2"/><circle cx="10" cy="10" r="10" fill="none" stroke="#C44010" stroke-width="0.5"/></svg>`;
+  return `<style>
+#hm-nav{background:#fff!important;border-bottom:1px solid #e2e5e9!important;padding:0 1.25rem!important;display:flex!important;align-items:center!important;gap:0!important;font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif!important;position:sticky!important;top:0!important;z-index:9999!important;height:auto!important;margin:0!important;overflow-x:auto!important;}
+#hm-nav .hm-nav-brand{font-weight:800!important;font-size:.95rem!important;color:#1a1a2e!important;padding:.6rem 0!important;margin-right:1.5rem!important;text-decoration:none!important;white-space:nowrap!important;display:flex!important;align-items:center!important;background:none!important;border:none!important;box-shadow:none!important;}
+#hm-nav .hm-nav-brand svg{display:inline-block!important;vertical-align:middle!important;flex-shrink:0!important;}
+#hm-nav .hm-nav-link{font-size:.8rem!important;font-weight:500!important;color:#5a6070!important;text-decoration:none!important;padding:.55rem .75rem!important;border-bottom:2px solid transparent!important;transition:color .15s,border-color .15s!important;white-space:nowrap!important;background:none!important;}
+#hm-nav .hm-nav-link:hover{color:#1a1a2e!important;}
+#hm-nav .hm-nav-link.hm-nav-active{color:#3b82f6!important;border-bottom-color:#3b82f6!important;font-weight:600!important;}
+@media(max-width:600px){#hm-nav{padding:0 .75rem!important;}#hm-nav .hm-nav-brand{font-size:.85rem!important;margin-right:.75rem!important;}#hm-nav .hm-nav-link{font-size:.72rem!important;padding:.5rem .5rem!important;}}
+</style><nav id="hm-nav"><a href="${BASE}/" class="hm-nav-brand">${logo}HoopsMatic</a>${links}</nav>`;
+}
+function injectNav(html, page) { return html.replace(/<body[^>]*>/, m => m + navBar(page)); }
+function injectPersistentNav(html, page) {
+  const script = `<script>(function(){var navHtml=${JSON.stringify(navBar(page))};function ensureNav(){if(document.getElementById('hm-nav-root'))return;var d=document.createElement('div');d.id='hm-nav-root';d.innerHTML=navHtml;document.body.insertBefore(d,document.body.firstChild);}if(document.body)ensureNav();var obs=new MutationObserver(function(){setTimeout(ensureNav,50)});document.addEventListener('DOMContentLoaded',function(){ensureNav();obs.observe(document.body,{childList:true});});})();</script>`;
+  return html.replace('</head>', script + '</head>');
+}
+function stripCF(html) {
+  return html.replace(/<script[^>]*cdn-cgi[^>]*><\/script>/gi,'').replace(/<script[^>]*email-decode[^>]*><\/script>/gi,'').replace(/\s*data-cfasync="[^"]*"/gi,'').replace(/<a[^>]*cdn-cgi\/l\/email-protection[^>]*>[\s\S]*?<\/a>/gi,'').replace(/<span[^>]*__cf_email__[^>]*>[^<]*<\/span>/gi,'');
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    // === TRADE DATA STORE (POST) — secured ===
+    if (url.pathname === '/rmstore' && request.method === 'POST') {
+      try {
+        const cl = parseInt(request.headers.get('Content-Length') || '0');
+        if (cl > 51200) return safeError('Payload too large (max 50KB)', 413, {'Access-Control-Allow-Origin':'*'});
+        const body = await request.text();
+        if (body.length > 51200) return safeError('Payload too large', 413, {'Access-Control-Allow-Origin':'*'});
+        const token = crypto.randomUUID().replace(/-/g,'').slice(0,16);
+        const cache = caches.default;
+        ctx.waitUntil(cache.put(new Request('https://hoopsmatic.com/_trade/'+token), new Response(body, {headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=300'}})));
+        return new Response(JSON.stringify({token}), {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
+      } catch(e) { return safeError('Trade store failed', 500, {'Access-Control-Allow-Origin':'*'}); }
+    }
+
+    // === TRADE DATA FETCH (GET) — token sanitized ===
+    if (url.pathname === '/rmfetch') {
+      const token = (url.searchParams.get('t')||'').replace(/[^a-z0-9]/gi,'').slice(0,32);
+      if (!token) return new Response('{}', {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
+      try {
+        const cached = await caches.default.match(new Request('https://hoopsmatic.com/_trade/'+token));
+        return new Response(cached ? await cached.text() : '{}', {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
+      } catch(e) { return new Response('{}', {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}}); }
+    }
+
+    // === RM RELAY ===
+    if (url.pathname === '/rmrelay') {
+      const d = url.searchParams.get('d') || '';
+      const targetUrl = d ? RM_URL + '?rmtrade=' + encodeURIComponent(d) : RM_URL;
+      return new Response('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Redirecting...</title></head><body style="background:#f8f9fa;color:#1a1a2e;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><p>Returning to Roster Manager...</p><script>window.location.href="'+targetUrl+'";<\/script></body></html>', {headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'no-store'}});
+    }
+
+    // === ANALYTICS DASHBOARD ===
+    if (url.pathname === '/analytics') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/analytics');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(ANALYTICS_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}});
+          if (!htmlR.ok) return safeError('Failed to fetch Analytics',502);
+          assembled = await htmlR.text();
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=60'}})));
+        }
+        return new Response(assembled, {headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'no-store'}});
+      } catch(err) { return safeError('Worker error loading Analytics'); }
+    }
+
+    // === HEALTH CHECK ===
+    if (url.pathname === '/version' || url.pathname === '/health') {
+      const checks = {};
+      try { const r = await fetch(sheetsURL(MAIN_SHEET,'Sheet1',env)+'&range=A1:A1',{headers:{'User-Agent':'Mozilla/5.0'}}); checks.sheets_api = r.ok?'ok':'error:'+r.status; } catch(e) { checks.sheets_api = 'unreachable'; }
+      try { const r = await fetch('https://raw.githubusercontent.com/aderoa/Injuries/main/index.html',{method:'HEAD',headers:{'User-Agent':'Mozilla/5.0'}}); checks.github = r.ok?'ok':'error:'+r.status; } catch(e) { checks.github = 'unreachable'; }
+      return new Response(JSON.stringify({version:'5.5.0',deployed:new Date().toISOString(),health:checks,pages:['/','/roster','/salary-season-finder','/contracts','/depth-charts','/defense','/real-value','/injuries','/draft','/draft-simulator']},null,2), {headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+    }
+
+    // === API PROXIES ===
+    if (['/api/contracts','/api/roster','/api/draft','/api/inj-csv','/api/tv-csv'].includes(url.pathname)) {
+      const feedMap = {'/api/contracts':{sheet:MAIN_SHEET,tab:'Sheet6',ttl:600},'/api/roster':{sheet:MAIN_SHEET,tab:'Sheet1',ttl:600},'/api/draft':{sheet:MAIN_SHEET,tab:'Sheet4',ttl:3600},'/api/inj-csv':{sheet:INJ_SHEET,tab:'Injuries',ttl:300},'/api/tv-csv':{sheet:MAIN_SHEET,tab:'Sheet3',ttl:600}};
+      const feed = feedMap[url.pathname];
+      const ao = getAllowedOrigin(request); if (!ao) return new Response('Forbidden',{status:403});
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_api_cache/'+url.pathname);
+      const cached = await cache.match(ck);
+      if (cached) return new Response(cached.body, {headers:{'Content-Type':'text/csv; charset=utf-8','Access-Control-Allow-Origin':ao,'X-Cache':'HIT'}});
+      try {
+        const csv = await fetchSheetAsCsv(feed.sheet,feed.tab,env);
+        if (!csv) return new Response('Upstream error',{status:502,headers:{'Access-Control-Allow-Origin':ao}});
+        ctx.waitUntil(cache.put(ck, new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Cache-Control':`public, max-age=${feed.ttl}`}}).clone()));
+        return new Response(csv, {headers:{'Content-Type':'text/csv; charset=utf-8','Access-Control-Allow-Origin':ao,'Cache-Control':`public, max-age=${feed.ttl}`,'X-Cache':'MISS'}});
+      } catch(e) { return safeError('Data fetch failed',502,{'Access-Control-Allow-Origin':ao}); }
+    }
+
+    // === API: DEFENSE SC/MPG CACHE (written by defense page, read by TV page) ===
+    if (url.pathname === '/api/defense-cache') {
+      if (request.method === 'OPTIONS') return new Response(null, {headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'86400'}});
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_cache/defense-scmpg');
+      if (request.method === 'POST') {
+        const body = await request.text();
+        try { JSON.parse(body); } catch(e) { return new Response('Invalid JSON',{status:400}); }
+        ctx.waitUntil(cache.put(ck, new Response(body,{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=7200'}})));
+        return new Response('OK',{headers:{'Access-Control-Allow-Origin':'*'}});
+      }
+      const cached = await cache.match(ck);
+      if (cached) return new Response(cached.body, {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*','X-Cache':'HIT'}});
+      return new Response('{}',{headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*','X-Cache':'MISS'}});
+    }
+
+    // === API: REAL VALUE SNAPSHOT (server-side, daily rotation) ===
+    // Stores two snapshots: "today" (current) and "yesterday" (prior day).
+    // When a day boundary is crossed (ET), today becomes yesterday before new data is written.
+    // Evolution delta = today - yesterday.
+    if (url.pathname === '/api/rv-snapshot') {
+      if (request.method === 'OPTIONS') return new Response(null, {headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'86400'}});
+      const cache = caches.default;
+      const todayKey = new Request('https://hoopsmatic.com/_cache/rv-snap-today');
+      const yesterdayKey = new Request('https://hoopsmatic.com/_cache/rv-snap-yesterday');
+
+      // Compute current ET date (YYYY-MM-DD)
+      function getETDate() {
+        const d = new Date();
+        const s = d.toLocaleString('en-US', {timeZone:'America/New_York', year:'numeric', month:'2-digit', day:'2-digit'});
+        const parts = s.match(/(\d+)\/(\d+)\/(\d+)/);
+        return parts ? `${parts[3]}-${parts[1]}-${parts[2]}` : '';
+      }
+      const currentETDate = getETDate();
+
+      if (request.method === 'POST') {
+        const body = await request.text();
+        let parsed;
+        try { parsed = JSON.parse(body); } catch(e) { return new Response('Invalid JSON',{status:400}); }
+        if (!parsed || typeof parsed !== 'object' || Object.keys(parsed).length < 100) {
+          return new Response('Snapshot too small', {status:400, headers:{'Access-Control-Allow-Origin':'*'}});
+        }
+        // Check existing today snapshot
+        const existingToday = await cache.match(todayKey);
+        let existingDate = null;
+        if (existingToday) {
+          try { existingDate = (await existingToday.clone().json())._date; } catch(e) {}
+        }
+        // If existing snapshot is from a prior ET day, rotate it to yesterday before overwriting
+        let rotated = false;
+        if (existingDate && existingDate !== currentETDate) {
+          const existingBody = await existingToday.clone().text();
+          ctx.waitUntil(cache.put(yesterdayKey, new Response(existingBody, {headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=172800'}})));
+          rotated = true;
+        }
+        // Always overwrite today's snapshot — captures latest data within the ET day
+        parsed._date = currentETDate;
+        parsed._updated = new Date().toISOString();
+        const newBody = JSON.stringify(parsed);
+        ctx.waitUntil(cache.put(todayKey, new Response(newBody, {headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=172800'}})));
+        // Return yesterday's snapshot in POST response so client can use it immediately
+        let yesterdayData = null;
+        if (rotated) {
+          // We just rotated the old today → yesterday, so old today IS yesterday
+          if (existingToday) { try { yesterdayData = await existingToday.clone().json(); } catch(e){} }
+        } else {
+          const yRes = await cache.match(yesterdayKey);
+          if (yRes) { try { yesterdayData = await yRes.json(); } catch(e){} }
+        }
+        return new Response(JSON.stringify({ok:true, rotated, date: currentETDate, players: Object.keys(parsed).filter(k => !k.startsWith('_')).length, yesterday: yesterdayData}), {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
+      }
+
+      // GET: return {today: {...}, yesterday: {...}}
+      const [todayRes, yesterdayRes] = await Promise.all([cache.match(todayKey), cache.match(yesterdayKey)]);
+      let today = null, yesterday = null;
+      if (todayRes) { try { today = await todayRes.json(); } catch(e){} }
+      if (yesterdayRes) { try { yesterday = await yesterdayRes.json(); } catch(e){} }
+      return new Response(JSON.stringify({today, yesterday, currentETDate}), {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*','Cache-Control':'no-store'}});
+    }
+
+    // === API: ACTIVITY TRACKER (anonymous aggregate counts) ===
+    if (url.pathname === '/api/tracker') {
+      if (request.method === 'OPTIONS') return new Response(null, {headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'86400'}});
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_cache/activity-tracker');
+
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json();
+          const { tool, action, player, team, extra } = body;
+          if (!tool || (!action && tool !== 'compare')) return new Response('Missing tool/action',{status:400,headers:{'Access-Control-Allow-Origin':'*'}});
+
+          // Load existing data
+          let data = { tm: { players: {}, teams: {}, trades: 0, recent: [] }, rm: { drafted: {}, signed: {}, waived: {}, optionPickup: {}, optionDecline: {}, draftedByTeam: {}, signedByTeam: {}, totalSims: 0, recent: [] }, compare: { players: {}, pairs: {}, total: 0, recent: [] }, _updated: '' };
+          const existing = await cache.match(ck);
+          if (existing) { try { data = await existing.json(); } catch(e) {} }
+          // Ensure structure
+          if (!data.tm) data.tm = { players: {}, teams: {}, trades: 0, recent: [] };
+          if (!data.rm) data.rm = { drafted: {}, signed: {}, waived: {}, optionPickup: {}, optionDecline: {}, draftedByTeam: {}, signedByTeam: {}, totalSims: 0, recent: [] };
+          if (!data.compare) data.compare = { players: {}, pairs: {}, total: 0, recent: [] };
+          if (!data.tm.recent) data.tm.recent = [];
+          if (!data.rm.recent) data.rm.recent = [];
+          if (!data.compare.recent) data.compare.recent = [];
+          const ts = new Date().toISOString();
+
+          if (tool === 'compare') {
+            const { player1, player2 } = body;
+            if (player1 && player2) {
+              data.compare.players[player1] = (data.compare.players[player1]||0) + 1;
+              data.compare.players[player2] = (data.compare.players[player2]||0) + 1;
+              const pairKey = [player1, player2].sort().join(' vs ');
+              data.compare.pairs[pairKey] = (data.compare.pairs[pairKey]||0) + 1;
+              data.compare.total = (data.compare.total||0) + 1;
+              data.compare.recent.unshift({ player1, player2, ts });
+              if (data.compare.recent.length > 200) data.compare.recent = data.compare.recent.slice(0, 200);
+            }
+          } else if (tool === 'tm') {
+            if (action === 'trade' && Array.isArray(body.players)) {
+              for (const p of body.players) { data.tm.players[p] = (data.tm.players[p]||0) + 1; }
+              if (Array.isArray(body.teams)) { for (const t of body.teams) { data.tm.teams[t] = (data.tm.teams[t]||0) + 1; } }
+              data.tm.trades = (data.tm.trades||0) + 1;
+              data.tm.recent.unshift({ action: 'trade', players: body.players, teams: body.teams || [], ts });
+              if (data.tm.recent.length > 200) data.tm.recent = data.tm.recent.slice(0, 200);
+            }
+          } else if (tool === 'rm') {
+            const entry = { action, player: player||null, team: team||null, ts };
+            if (extra) entry.extra = extra;
+            if (action === 'draft' && player) {
+              data.rm.drafted[player] = (data.rm.drafted[player]||0) + 1;
+              if (team) data.rm.draftedByTeam[team] = (data.rm.draftedByTeam[team]||0) + 1;
+            } else if (action === 'sign' && player) {
+              data.rm.signed[player] = (data.rm.signed[player]||0) + 1;
+              if (team) data.rm.signedByTeam[team] = (data.rm.signedByTeam[team]||0) + 1;
+            } else if (action === 'waive' && player) {
+              data.rm.waived[player] = (data.rm.waived[player]||0) + 1;
+            } else if (action === 'option_pickup' && player) {
+              data.rm.optionPickup[player] = (data.rm.optionPickup[player]||0) + 1;
+            } else if (action === 'option_decline' && player) {
+              data.rm.optionDecline[player] = (data.rm.optionDecline[player]||0) + 1;
+            } else if (action === 'sim_start') {
+              data.rm.totalSims = (data.rm.totalSims||0) + 1;
+            }
+            data.rm.recent.unshift(entry);
+            if (data.rm.recent.length > 500) data.rm.recent = data.rm.recent.slice(0, 500);
+          }
+
+          data._updated = new Date().toISOString();
+          ctx.waitUntil(cache.put(ck, new Response(JSON.stringify(data), {headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=86400'}})));
+          return new Response(JSON.stringify({ok:true}), {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
+        } catch(e) { return new Response(JSON.stringify({error:e.message}), {status:400,headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}}); }
+      }
+
+      // GET: return leaderboards
+      const existing = await cache.match(ck);
+      if (!existing) return new Response(JSON.stringify({tm:{players:{},teams:{},trades:0},rm:{drafted:{},signed:{},waived:{},optionPickup:{},optionDecline:{},draftedByTeam:{},signedByTeam:{},totalSims:0}}), {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*'}});
+      return new Response(existing.body, {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':'*','Cache-Control':'no-store'}});
+    }
+
+    // === API: DEFENSE DATA JSON ===
+    if (url.pathname === '/api/defense-data') {
+      const ao = getAllowedOrigin(request); if (!ao) return new Response('Forbidden',{status:403});
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_api_cache/defense-data');
+      const cached = await cache.match(ck);
+      if (cached) return new Response(cached.body, {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':ao,'X-Cache':'HIT'}});
+      try {
+        const r = await fetch(sheetsURL(DEF_SHEET,'Defensive_Rankings',env),{headers:{'User-Agent':'Mozilla/5.0'}});
+        if (!r.ok) return safeError('Upstream error',502,{'Access-Control-Allow-Origin':ao});
+        const j = await r.text();
+        ctx.waitUntil(cache.put(ck, new Response(j,{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=300'}})));
+        return new Response(j, {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':ao,'Cache-Control':'public, max-age=300','X-Cache':'MISS'}});
+      } catch(e) { return safeError('Defense data failed',502,{'Access-Control-Allow-Origin':ao}); }
+    }
+
+    // === API: DRAFT CSV (Sheets API v4) ===
+    if (url.pathname === '/api/draft-csv') {
+      const ao = getAllowedOrigin(request); if (!ao) return new Response('Forbidden',{status:403});
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_api_cache/draft-csv');
+      const cached = await cache.match(ck);
+      if (cached) return new Response(cached.body, {headers:{'Content-Type':'text/csv; charset=utf-8','Access-Control-Allow-Origin':ao,'X-Cache':'HIT'}});
+      try {
+        const DRAFT_SHEET_PUB = '2PACX-1vSg6im6IYB6HXMGzQbmmBnLw9SfQLzxCSo8OfChxlJLhsB6BBCO0wPF_TMch0YgAbtFqYkwDWrsxRe7';
+        const csvUrl = `https://docs.google.com/spreadsheets/d/e/${DRAFT_SHEET_PUB}/pub?gid=965849547&single=true&output=csv`;
+        const r = await fetch(csvUrl,{headers:{'User-Agent':'Mozilla/5.0'}});
+        if (!r.ok) return safeError('Draft upstream error',502,{'Access-Control-Allow-Origin':ao});
+        const csv = await r.text();
+        ctx.waitUntil(cache.put(ck, new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Cache-Control':'public, max-age=3600'}})));
+        return new Response(csv, {headers:{'Content-Type':'text/csv; charset=utf-8','Access-Control-Allow-Origin':ao,'Cache-Control':'public, max-age=3600','X-Cache':'MISS'}});
+      } catch(e) { return safeError('Draft fetch failed',502,{'Access-Control-Allow-Origin':ao}); }
+    }
+
+    // === API: PLAYER STATS ===
+    if (url.pathname === '/api/stats') {
+      const ao = getAllowedOrigin(request); if (!ao) return new Response('Forbidden',{status:403});
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_stats_cache/pergame');
+      const cached = await cache.match(ck);
+      if (cached) return new Response(cached.body, {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':ao,'X-Cache':'HIT'}});
+      try {
+        const csvResp = await fetch('https://docs.google.com/spreadsheets/d/e/2PACX-1vS76TFTnuKfq8d_bHeM6lF06zCzMisiytTbdIA0i0woFNrlO5b4NwdGpmYG1wtVeu_EvMjYexWFP5vA/pub?gid=1181534071&single=true&output=csv',{headers:{'User-Agent':'Mozilla/5.0'}});
+        if (!csvResp.ok) return safeError('Stats unavailable',502,{'Access-Control-Allow-Origin':ao});
+        const lines = (await csvResp.text()).split('\n').map(l=>l.replace(/\r$/,''));
+        let hi = -1; for (let i=0;i<Math.min(lines.length,5);i++) if(lines[i].includes('PLAYER_NAME')){hi=i;break;}
+        if (hi<0) return safeError('No header',500,{'Access-Control-Allow-Origin':ao});
+        const hdr=lines[hi].split(','), ci={}; hdr.forEach((h,i)=>{ci[h.trim()]=i;});
+        const slim=[]; for(let i=hi+1;i<lines.length;i++){const c=lines[i].split(','),nm=(c[ci.PLAYER_NAME]||'').trim();if(!nm)continue;slim.push({name:nm,team:(c[ci.TEAM_ABBREVIATION]||'').trim(),gp:parseInt(c[ci.GP])||0,mpg:parseFloat(c[ci.MIN])||0,ppg:parseFloat(c[ci.PTS])||0,rpg:parseFloat(c[ci.REB])||0,apg:parseFloat(c[ci.AST])||0});}
+        const body=JSON.stringify(slim);
+        ctx.waitUntil(cache.put(ck, new Response(body,{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=7200'}})));
+        return new Response(body,{headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':ao,'Cache-Control':'public, max-age=7200','X-Cache':'MISS'}});
+      } catch(e) { return safeError('Stats failed',500,{'Access-Control-Allow-Origin':ao}); }
+    }
+
+    // === API: DEFENSE ===
+    if (url.pathname === '/api/defense') {
+      const ao = getAllowedOrigin(request); if (!ao) return new Response('Forbidden',{status:403});
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_cache/defense-data');
+      const cached = await cache.match(ck);
+      if (cached) return new Response(cached.body, {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':ao,'X-Cache':'HIT'}});
+      try {
+        const r = await fetch(sheetsURL(DEF_SHEET,'Defensive_Rankings',env),{headers:{'User-Agent':'Mozilla/5.0'}});
+        if (!r.ok) return safeError('Sheets error',502,{'Access-Control-Allow-Origin':ao});
+        const b = await r.text();
+        ctx.waitUntil(cache.put(ck, new Response(b,{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=3600'}})));
+        return new Response(b, {headers:{'Content-Type':'application/json','Access-Control-Allow-Origin':ao,'Cache-Control':'public, max-age=3600','X-Cache':'MISS'}});
+      } catch(e) { return safeError('Defense failed',500,{'Access-Control-Allow-Origin':ao}); }
+    }
+
+    // === RM API: Roster data (Sheet1) — no origin check, same-domain ===
+    // === RM API endpoints with Worker-side caching ===
+    if (['/api/rm-roster','/api/rm-draft','/api/rm-contracts','/api/rm-tv'].includes(url.pathname)) {
+      const tabMap = {'/api/rm-roster':'Sheet1','/api/rm-draft':'Sheet4','/api/rm-contracts':'Sheet6','/api/rm-tv':'Sheet3'};
+      const ttlMap = {'/api/rm-roster':180,'/api/rm-draft':600,'/api/rm-contracts':300,'/api/rm-tv':300};
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_api_cache'+url.pathname);
+        const cached = await cache.match(ck);
+        if (cached) return new Response(await cached.text(), { headers: { 'Content-Type': 'text/csv; charset=UTF-8', 'Cache-Control': 'public, max-age=120', 'Access-Control-Allow-Origin': '*' } });
+        const csv = await fetchSheetAsCsv(MAIN_SHEET, tabMap[url.pathname], env);
+        if (!csv) return safeError('Failed to fetch ' + url.pathname, 502);
+        const ttl = ttlMap[url.pathname] || 180;
+        ctx.waitUntil(cache.put(ck, new Response(csv, {headers:{'Content-Type':'text/csv','Cache-Control':'public, max-age='+ttl}})));
+        return new Response(csv, { headers: { 'Content-Type': 'text/csv; charset=UTF-8', 'Cache-Control': 'public, max-age=120', 'Access-Control-Allow-Origin': '*' } });
+      } catch (err) { return safeError('RM API error: ' + url.pathname); }
+    }
+
+    // === SEASON COMPARISON API: proxy Google Sheets to hide sheet ID ===
+    if (url.pathname === '/api/season-data') {
+      const tabGids = {rsStats:1169156479,rsStatsPerGame:1181534071,advanced:339737563,misc:52077302,scoring:867936474,usage:1415078232,clutch:10789411,bio:442838927,hustle:439158060,shotLocation:1205457990,defense:1957258468};
+      const tab = url.searchParams.get('tab');
+      if (!tab || !tabGids[tab]) return new Response('Invalid tab',{status:400});
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_api_cache/season-'+tab);
+        const cached = await cache.match(ck);
+        if (cached) return new Response(await cached.text(), {headers:{'Content-Type':'text/csv; charset=UTF-8','Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'}});
+        const gid = tabGids[tab];
+        const csvUrl = `https://docs.google.com/spreadsheets/d/${DEF_SHEET}/export?format=csv&gid=${gid}`;
+        const r = await fetch(csvUrl,{headers:{'User-Agent':'Mozilla/5.0'},redirect:'follow'});
+        if (!r.ok) return safeError('Failed to fetch season data',502);
+        const csv = await r.text();
+        ctx.waitUntil(cache.put(ck, new Response(csv,{headers:{'Content-Type':'text/csv','Cache-Control':'public, max-age=300'}})));
+        return new Response(csv, {headers:{'Content-Type':'text/csv; charset=UTF-8','Cache-Control':'public, max-age=300','Access-Control-Allow-Origin':'*'}});
+      } catch(err) { return safeError('Season data API error'); }
+    }
+
+    // === CORS preflight ===
+    if (request.method === 'OPTIONS') return new Response(null, {headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Allow-Headers':'*'}});
+
+    // ================================================================
+    // PAGE HANDLERS
+    // ================================================================
+
+    // === DRAFT SIMULATOR (new: v5.5) ===
+    // Standalone RM-Lite draft app: lottery, draft board, shareable URL state.
+    // Fetches its own data via /api/rm-draft. Self-contained HTML with nav injected.
+    if (url.pathname === '/draft-simulator' || url.pathname === '/draft-simulator/') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/draft-simulator');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(DRAFT_SIM_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}});
+          if (!htmlR.ok) return safeError('Failed to fetch Draft Simulator',502);
+          let html = stripCF(await htmlR.text());
+          html = injectNav(html, 'draftsim');
+          html = injectOG(html, 'draftsim');
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:HTML_HEADERS});
+      } catch(err) { return safeError('Worker error loading Draft Simulator'); }
+    }
+
+    // === ROSTER MANAGER (includes /roster/:team/:phase deep links) ===
+    if (url.pathname === '/roster' || url.pathname.startsWith('/roster/')) {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/roster');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(RM_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*','Cache-Control':'no-cache, no-store','Pragma':'no-cache'}});
+          if (!htmlR.ok) return safeError('Failed to fetch Roster Manager',502);
+          assembled = await htmlR.text();
+          assembled = injectNav(assembled, 'roster');
+          assembled = injectOG(assembled, 'roster');
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:{...HTML_HEADERS,'Content-Security-Policy':"default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src * data:; connect-src 'self' https://sheets.googleapis.com https://*.googleusercontent.com https://raw.githubusercontent.com https://cdn.nba.com https://hoopsmatic.com https://docs.google.com https://flagcdn.com https://aderoa.github.io https://api.github.com; frame-src https://hoopsmatic.com;"}});
+      } catch(err) { return safeError('Worker error loading Roster Manager'); }
+    }
+
+    // === CONTRACTS ===
+    if (url.pathname === '/contracts') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/contracts');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const STATS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS76TFTnuKfq8d_bHeM6lF06zCzMisiytTbdIA0i0woFNrlO5b4NwdGpmYG1wtVeu_EvMjYexWFP5vA/pub?gid=1181534071&single=true&output=csv';
+          const [htmlR, csvC, csvR, csvD, csvS] = await Promise.all([
+            fetch(CONTRACTS_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}}),
+            fetchSheetAsCsv(MAIN_SHEET,'Sheet6',env), fetchSheetAsCsv(MAIN_SHEET,'Sheet1',env),
+            fetchSheetAsCsv(MAIN_SHEET,'Sheet4',env), fetch(STATS_URL,{headers:{'User-Agent':'Mozilla/5.0'}}).catch(()=>null),
+          ]);
+          if (!htmlR.ok) return safeError('Failed to fetch Contracts',502);
+          let html = stripCF(await htmlR.text());
+          html = html.replace('<style>', `<style>\n.header{padding:1.5rem 2rem 0.75rem!important;}.header .tag{color:var(--accent)!important;background:rgba(59,130,246,0.08)!important;}\n`);
+          html = injectNav(html, 'contracts'); html = injectOG(html, 'contracts');
+          let inj = '<script>';
+          if (csvC) inj += 'window.__CSV_CONTRACTS__="'+btoa(unescape(encodeURIComponent(csvC)))+'";';
+          if (csvR) inj += 'window.__CSV_ROSTER__="'+btoa(unescape(encodeURIComponent(csvR)))+'";';
+          if (csvD) inj += 'window.__CSV_DRAFT__="'+btoa(unescape(encodeURIComponent(csvD)))+'";';
+          if (csvS && csvS.ok) { try { const st=await csvS.text(), sl=st.split('\n').map(l=>l.replace(/\r$/,'')); let si=-1; for(let i=0;i<Math.min(sl.length,5);i++)if(sl[i].includes('PLAYER_NAME')){si=i;break;} if(si>=0){const sh=sl[si].split(','),ci={};sh.forEach((h,j)=>{ci[h.trim()]=j});const sa=[];for(let i=si+1;i<sl.length;i++){const c=sl[i].split(','),nm=(c[ci.PLAYER_NAME]||'').trim();if(!nm)continue;sa.push({name:nm,team:(c[ci.TEAM_ABBREVIATION]||'').trim(),gp:parseInt(c[ci.GP])||0,mpg:parseFloat(c[ci.MIN])||0,ppg:parseFloat(c[ci.PTS])||0,rpg:parseFloat(c[ci.REB])||0,apg:parseFloat(c[ci.AST])||0});}inj+='window.__STATS_JSON__='+JSON.stringify(sa)+';';} } catch(e){} }
+          inj += '<'+'/script>\n';
+          html = html.replace(/<script/, inj+'<script');
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:HTML_HEADERS});
+      } catch(err) { return safeError('Worker error loading Contracts'); }
+    }
+
+    // === DEPTH CHARTS — all 30 teams, Presto-style ===
+    if (url.pathname === '/depth-charts') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/depth-charts');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const [htmlR, orderR] = await Promise.all([
+            fetch(DEPTH_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}}),
+            fetch('https://raw.githubusercontent.com/aderoa/DepthCharts/main/order.json?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0'}}).catch(()=>null),
+          ]);
+          if (!htmlR.ok) return safeError('Failed to fetch Depth Charts',502);
+          let html = stripCF(await htmlR.text());
+          html = html.replace('<head>', `<head>\n<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">`);
+          html = html.replace('<style>', `<style>\n:root{--bg:#f8f9fa!important;--surface:#fff!important;--surface2:#f3f4f6!important;--border:#e2e5e9!important;--text:#1a1a2e!important;--text2:#5a6070!important;--text-muted:#8892a6!important;--accent:#3b82f6!important;--accent-dim:rgba(59,130,246,0.07)!important;--green:#16a34a!important;--red:#dc2626!important;--orange:#f59e0b!important;}\nbody{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif!important;background:var(--bg)!important;color:var(--text)!important;}\n`);
+          let ds = '<script>';
+          if (orderR && orderR.ok) {
+            try {
+              const orderData = JSON.parse(await orderR.text());
+              const POSITIONS = ['PG','SG','SF','PF','C'];
+              for (const team of Object.keys(orderData)) {
+                const td = orderData[team];
+                const allSec = {};
+                for (const pos of POSITIONS) {
+                  const arr = td[pos] || [];
+                  const secs = [[]];
+                  for (const item of arr) {
+                    if (item === '__SEPARATOR__') secs.push([]);
+                    else if (item !== '__SPACER__') secs[secs.length-1].push(item);
+                  }
+                  while (secs.length > 0 && secs[secs.length-1].length === 0) secs.pop();
+                  allSec[pos] = secs;
+                }
+                const maxSec = Math.max(...POSITIONS.map(p => allSec[p].length), 1);
+                for (const pos of POSITIONS) while (allSec[pos].length < maxSec) allSec[pos].push([]);
+                for (const pos of POSITIONS) {
+                  const out = [];
+                  for (let si = 0; si < maxSec; si++) {
+                    const maxD = Math.max(...POSITIONS.map(p => (allSec[p][si]||[]).length), 0) || 1;
+                    const sec = allSec[pos][si] || [];
+                    out.push(...sec);
+                    for (let pad = sec.length; pad < maxD; pad++) out.push('__SPACER__');
+                    if (si < maxSec - 1) out.push('__SEPARATOR__');
+                  }
+                  td[pos] = out;
+                }
+              }
+              const cleanB64 = btoa(unescape(encodeURIComponent(JSON.stringify(orderData))));
+              ds += 'window.__DC_ORDER__=JSON.parse(decodeURIComponent(escape(atob("'+cleanB64+'"))));';
+            } catch(e) {}
+          }
+          ds += '<'+'/script>\n';
+          html = html.replace(/<script/, ds+'<script');
+          html = html.replace(
+            "const exportParam = params.get('export');",
+            "const exportParam = 'all'; // HoopsMatic: force export-all mode"
+          );
+          html = html.replace(
+            "const orderURL = new URL('order.json', window.location.href.split('?')[0]).href;",
+            "const orderURL = 'https://raw.githubusercontent.com/aderoa/DepthCharts/main/order.json';"
+          );
+          html = html.replace(
+            'fetch(orderURL)',
+            "(window.__DC_ORDER__?Promise.resolve({ok:true,json:()=>Promise.resolve(window.__DC_ORDER__)}):fetch(orderURL))"
+          );
+          html = injectNav(html, 'depth'); html = injectOG(html, 'depth');
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:HTML_HEADERS});
+      } catch(err) { return safeError('Worker error loading Depth Charts'); }
+    }
+
+    // === INJURIES ===
+    if (url.pathname === '/injuries') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/injuries');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const [htmlR, injCsv, rosterCsv, jsonR] = await Promise.all([
+            fetch(INJURIES_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}}),
+            fetchSheetAsCsv(INJ_SHEET,'Injuries',env), fetchSheetAsCsv(MAIN_SHEET,'Sheet1',env),
+            fetch('https://raw.githubusercontent.com/aderoa/Injuries/main/injuries.json?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0'}}).catch(()=>null),
+          ]);
+          if (!htmlR.ok) return safeError('Failed to fetch Injuries',502);
+          let html = stripCF(await htmlR.text());
+          html = html.replace('<head>', `<head>\n<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">`);
+          html = html.replace('<style>', `<style>\n:root{--bg:#f8f9fa!important;--surface:#fff!important;--surface2:#f3f4f6!important;--border:#e2e5e9!important;--text:#1a1a2e!important;--text2:#5a6070!important;--accent:#3b82f6!important;--out:#dc2626!important;--doubtful:#ea580c!important;--questionable:#d97706!important;--probable:#16a34a!important;--available:#059669!important;--modified-bg:rgba(59,130,246,0.04)!important;--modified-border:rgba(59,130,246,0.15)!important;}\nbody{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif!important;}\n`);
+          let ds = '<script>';
+          if (injCsv) ds += 'window.__INJ_CSV__="'+btoa(unescape(encodeURIComponent(injCsv)))+'";';
+          if (rosterCsv) {
+            ds += 'window.__INJ_ROSTER__="'+btoa(unescape(encodeURIComponent(rosterCsv)))+'";';
+            try {
+              const rows=[],txt=rosterCsv; let cur='',inQ=false,row=[];
+              for(let i=0;i<txt.length;i++){const c=txt[i];if(c==='"'){if(inQ&&txt[i+1]==='"'){cur+='"';i++}else inQ=!inQ}else if(c===','&&!inQ){row.push(cur.trim());cur=''}else if((c==='\n'||c==='\r')&&!inQ){if(c==='\r'&&txt[i+1]==='\n')i++;row.push(cur.trim());if(row.length>1||row[0])rows.push(row);row=[];cur=''}else cur+=c}
+              row.push(cur.trim());if(row.length>1||row[0])rows.push(row);
+              if(rows.length>1){const hdr=rows[0].map(h=>h.toUpperCase()),pi=hdr.indexOf('PLAYER'),hi=hdr.indexOf('HEADSHOT');
+              if(pi>=0&&hi>=0){const hsMap={};for(let i=1;i<rows.length;i++){const nm=(rows[i][pi]||'').trim(),hs=(rows[i][hi]||'').trim();if(nm&&hs&&hs.startsWith('http'))hsMap[nm]=hs;}ds+='window.__HEADSHOTS__='+JSON.stringify(hsMap)+';';}}
+            } catch(e){}
+          }
+          if (jsonR && jsonR.ok) { try { ds += 'window.__INJ_JSON__=JSON.parse(decodeURIComponent(escape(atob("'+btoa(unescape(encodeURIComponent(await jsonR.text())))+'"))));'; } catch(e){} }
+          ds += '<'+'/script>\n';
+          html = html.replace(/<script/, ds+'<script');
+          html = html.replace("const JSON_URL = 'injuries.json';", "const JSON_URL = 'https://raw.githubusercontent.com/aderoa/Injuries/main/injuries.json';");
+          html = html.replace('fetchSheets(CSV_URL),', '(window.__INJ_CSV__?Promise.resolve({ok:true,text:()=>Promise.resolve(decodeURIComponent(escape(atob(window.__INJ_CSV__))))}):fetchSheets(CSV_URL)),');
+          html = html.replace('fetchSheets(ROSTER_CSV_URL),', '(window.__INJ_ROSTER__?Promise.resolve({ok:true,text:()=>Promise.resolve(decodeURIComponent(escape(atob(window.__INJ_ROSTER__))))}):fetchSheets(ROSTER_CSV_URL)),');
+          html = html.replace("fetch(JSON_URL + '?t=' + Date.now())", "(window.__INJ_JSON__?Promise.resolve({ok:true,json:()=>Promise.resolve(window.__INJ_JSON__)}):fetch(JSON_URL+'?t='+Date.now()))");
+          html = html.replace("const isAdmin = new URLSearchParams(window.location.search).has('admin');", "const isAdmin = false;");
+          html = html.replace(".filter(e => !(e.status === 'Available' && e.prevStatus === 'Available'))","");
+          html = html.replace("document.getElementById('preview').innerHTML = '<p style=\"color:#888;text-align:center;padding:2rem;\">Preview disabled for performance. Use the copy buttons above.</p>';", "var preview = document.getElementById('preview'); if (idx === -1) { preview.innerHTML = sectionsHTML.join('<br>'); } else if (sectionsHTML[idx]) { preview.innerHTML = sectionsHTML[idx]; } if (window._hmEnhanceTables) setTimeout(window._hmEnhanceTables, 100);");
+          html = html.replace(/const API_KEY = '[^']+';/, "const API_KEY = '';");
+          html = html.replace(/const INJ_SHEETS_ID = '[^']+';/, "const INJ_SHEETS_ID = '';");
+          html = html.replace(/const ROSTER_SHEETS_ID = '[^']+';/, "const ROSTER_SHEETS_ID = '';");
+          html = html.replace(/const CSV_URL = [^;]+;/, "const CSV_URL = '/api/inj-csv';");
+          html = html.replace(/const ROSTER_CSV_URL = [^;]+;/, "const ROSTER_CSV_URL = '/api/roster';");
+
+          const safeNavJson = JSON.stringify(navBar('injuries')).replace(/</g,'\\u003c').replace(/\//g,'\\u002f');
+          const hmScript = `<script>
+(function(){
+var navHtml = ${safeNavJson};
+function fixPage() {
+  if (!document.getElementById('hm-nav-root')) { var d=document.createElement('div');d.id='hm-nav-root';d.innerHTML=navHtml;document.body.insertBefore(d,document.body.firstChild); }
+  var tb=document.getElementById('reportToolbar');if(tb)tb.style.display='none';
+  var h1=document.querySelector('.admin-header h1');if(h1)h1.innerHTML='🏥 NBA Injury Report';
+  window._hmHeadshots=window.__HEADSHOTS__||{};
+  window._hmEnhanceTables=function(){document.querySelectorAll('.inj-tbl td strong').forEach(function(el){if(el.dataset.hm)return;el.dataset.hm='1';var name=el.textContent.trim();if(!name||name.length<3)return;var tbl=el.closest('table');var h2=tbl?tbl.previousElementSibling:null;if(h2&&h2.textContent&&h2.textContent.toLowerCase().includes('salary per team'))return;var hs=window._hmHeadshots[name];var img=hs?'<img src="'+hs+'" class="hm-hs" onerror="this.style.display=\\'none\\'">':'';el.innerHTML=img+'<a class="hm-player-link" onclick="event.preventDefault();event.stopPropagation();window._hmShowCard(\\''+name.replace(/'/g,"\\\\\\\\'")+'\\')">'+name+'</a>';});document.querySelectorAll('.inj-tbl').forEach(function(tbl){var h2=tbl.previousElementSibling;if(!h2)return;var title=(h2.textContent||'').toLowerCase();if(!title.includes('salary per team')&&!title.includes('highest-paid'))return;if(tbl.querySelector('.hm-rank'))return;var thead=tbl.querySelector('thead tr');if(thead){var th=document.createElement('th');th.textContent='#';th.style.cssText='width:24px;text-align:center;';thead.insertBefore(th,thead.firstChild);}var rank=1;tbl.querySelectorAll('tbody tr').forEach(function(row){var td=document.createElement('td');td.innerHTML='<span class="hm-rank">'+rank+'</span>';td.style.textAlign='center';row.insertBefore(td,row.firstChild);rank++;});});document.querySelectorAll('.inj-total img').forEach(function(img){img.style.width='24px';img.style.height='24px';});};
+  window._hmShowCard=function(name){var ov=document.createElement('div');ov.className='hm-pp-overlay';ov.onclick=function(e){if(e.target===ov){document.body.removeChild(ov);document.body.style.overflow='';}};var fr=document.createElement('iframe');fr.className='hm-pp-frame';fr.src='/contracts#'+encodeURIComponent(name);ov.appendChild(fr);document.body.appendChild(ov);document.body.style.overflow='hidden';document.addEventListener('keydown',function handler(e){if(e.key==='Escape'){if(ov.parentNode){document.body.removeChild(ov);document.body.style.overflow='';}document.removeEventListener('keydown',handler);}});};
+  var s=document.createElement('style');
+  s.textContent='#hm-nav-root{position:sticky;top:0;z-index:9999;}.report-container{max-width:1400px!important;padding:16px 2rem 80px!important;}.admin-header{border-bottom:none!important;padding:1.5rem 0 0.5rem!important;}.admin-header h1{font-family:"DM Sans",-apple-system,BlinkMacSystemFont,sans-serif!important;font-size:1.5rem!important;font-weight:800!important;letter-spacing:-0.02em!important;color:#1a1a2e!important;}.tab-bar{display:flex!important;gap:0.6rem!important;margin-bottom:1.25rem!important;}.tab-bar button{font-family:"DM Sans",sans-serif!important;font-size:0.78rem!important;font-weight:600!important;padding:0.55rem 1rem!important;border-radius:8px!important;border:1px solid #e2e5e9!important;background:#fff!important;color:#5a6070!important;cursor:pointer!important;transition:all 0.15s!important;}.tab-bar button:hover{border-color:#3b82f6!important;color:#3b82f6!important;}.tab-bar button.active{background:rgba(59,130,246,0.07)!important;border-color:#3b82f6!important;color:#3b82f6!important;}.inj-tbl{width:100%;border-collapse:collapse;font-size:0.82rem;font-family:"DM Sans",-apple-system,sans-serif;}.inj-tbl thead tr{background:transparent;}.inj-tbl th{background:#f3f4f6;color:#8892a6;font-family:"JetBrains Mono","DM Mono",monospace;font-size:0.62rem;font-weight:500;text-transform:uppercase;letter-spacing:0.06em;padding:0.6rem 0.5rem;text-align:left;border:none;border-bottom:1px solid #e2e5e9;white-space:nowrap;height:auto;}.inj-tbl td{border:none;border-bottom:1px solid #e2e5e9;padding:0.5rem 0.5rem;text-align:left;height:44px;vertical-align:middle;font-family:"DM Sans",-apple-system,sans-serif;}.inj-tbl td strong{font-family:"DM Sans",-apple-system,sans-serif!important;font-weight:600!important;}.inj-tbl tbody tr{transition:background 0.12s;}.inj-tbl tbody tr:hover{background:rgba(59,130,246,0.03);}.inj-tbl th.logo-col,.inj-tbl td.logo-col{width:36px;min-width:36px;text-align:center;padding:0.5rem 0.25rem;}.inj-logo{width:24px!important;height:24px!important;vertical-align:middle;}.inj-total td{background:#f3f4f6!important;font-weight:700;}h2{font-family:"DM Sans",-apple-system,sans-serif!important;font-size:1.1rem!important;font-weight:700!important;color:#1a1a2e!important;margin:1.5rem 0 0.6rem!important;}.hm-player-link{color:inherit;text-decoration:none;font-weight:600;cursor:pointer;font-family:"DM Sans",sans-serif;}.hm-player-link:hover{color:#3b82f6;}.hm-rank{font-size:.65rem;color:#5a6070;font-weight:600;min-width:20px;display:inline-block;text-align:center;}.hm-hs{width:24px;height:18px;border-radius:3px;object-fit:cover;vertical-align:middle;margin-right:4px;}.hm-pp-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:10001;display:flex;justify-content:center;padding:2rem;overflow-y:auto;}.hm-pp-frame{border:none;max-width:740px;width:100%;height:90vh;border-radius:12px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.2);}';
+  document.head.appendChild(s);
+  var rt=0,tm=setInterval(function(){var tbls=document.querySelectorAll('.inj-tbl');if(tbls.length>0&&tbls[0].querySelector('tbody tr')){clearInterval(tm);window._hmEnhanceTables();}if(++rt>40)clearInterval(tm);},500);
+}
+var obs=new MutationObserver(function(){setTimeout(fixPage,50)});
+document.addEventListener('DOMContentLoaded',function(){fixPage();obs.observe(document.body,{childList:true});});
+})();
+</script>`;
+          html = html.replace('</head>', hmScript+'</head>');
+          html = injectOG(html, 'injuries');
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:HTML_HEADERS});
+      } catch(err) { return safeError('Worker error loading Injuries'); }
+    }
+
+    // === DEFENSIVE RANKINGS (RS / Playoffs) ===
+    if (url.pathname === '/defense') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/defense');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const [htmlR, dataRS, dataPO] = await Promise.all([
+            fetch(DEFENSE_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}}),
+            fetch(sheetsURL(DEF_SHEET,'Defensive_Rankings',env),{headers:{'User-Agent':'Mozilla/5.0'}}).catch(()=>null),
+            fetch(sheetsURL(DEF_SHEET,'Defensive_Playoffs',env),{headers:{'User-Agent':'Mozilla/5.0'}}).catch(()=>null),
+          ]);
+          if (!htmlR.ok) return safeError('Failed to fetch Defense',502);
+          let html = stripCF(await htmlR.text());
+          html = html.replace('<head>', `<head>\n<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">`);
+          html = html.replace('<style>', `<style>\n:root{--bg:#f8f9fa!important;--surface:#ffffff!important;--card:#ffffff!important;--border:#e2e5e9!important;--border-light:#eef0f2!important;--text:#1a1a2e!important;--text-secondary:#5a6070!important;--text-muted:#8892a6!important;--green:#16a34a!important;--red:#dc2626!important;}\n.header{padding:1.5rem 2rem 0.75rem!important;}.header::before{display:none!important;}.header-brand h1{color:var(--text)!important;-webkit-text-fill-color:var(--text)!important;}.header-brand .tag{color:var(--accent)!important;background:rgba(59,130,246,0.08)!important;}.header-subtitle{color:var(--text-secondary)!important;}.stats-bar{margin:1rem auto 0!important;max-width:1400px!important;padding:0 2rem!important;}\n.period-bar{display:flex;gap:0.5rem;}.period-btn{font-family:inherit;font-size:0.78rem;font-weight:600;padding:0.5rem 1rem;border-radius:8px;border:1px solid #e2e5e9;background:#fff;color:#5a6070;cursor:pointer;transition:all 0.15s;}.period-btn:hover{border-color:#3b82f6;color:#3b82f6;}.period-btn.active{background:rgba(59,130,246,0.07);border-color:#3b82f6;color:#3b82f6;}\n.hm-phase-bar{display:flex;gap:.4rem;max-width:1400px;margin:.25rem auto 0;padding:.5rem 2rem 0;flex-wrap:wrap;}.hm-phase-btn{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;font-size:.78rem;font-weight:600;padding:.5rem 1rem;border-radius:8px;border:1px solid #e2e5e9;background:#fff;color:#5a6070;cursor:pointer;text-decoration:none;display:inline-block;transition:all .15s;}.hm-phase-btn:hover{border-color:#3b82f6;color:#3b82f6;}.hm-phase-btn.active{background:rgba(59,130,246,.07);border-color:#3b82f6;color:#3b82f6;}\n`);
+
+          // Inject both datasets + phase selector (phase read client-side from ?phase=)
+          let defScript = '<script>';
+          defScript += '(function(){var p=(new URLSearchParams(location.search).get("phase")||"rs").toLowerCase();if(!["rs","po"].includes(p))p="rs";window.__DEF_PHASE__=p;})();';
+          if (dataRS && dataRS.ok) defScript += 'window.__DEF_DATA_RS__=' + (await dataRS.text()) + ';';
+          if (dataPO && dataPO.ok) defScript += 'window.__DEF_DATA_PO__=' + (await dataPO.text()) + ';';
+          defScript += 'window.__DEF_DATA__=(window.__DEF_PHASE__==="po"?(window.__DEF_DATA_PO__||window.__DEF_DATA_RS__):window.__DEF_DATA_RS__);';
+          defScript += '<'+'/script>\n';
+          html = html.replace(/<script/, defScript + '<script');
+
+          html = html.replace(/const STATS_ID = '[^']+';/, "const STATS_ID = '';");
+          html = html.replace(/const API_KEY\s*= '[^']+';/, "const API_KEY = '';");
+          html = html.replace("const makeURL  = tab => `${BASE_URL}/${encodeURIComponent(tab)}?key=${API_KEY}`;", "const makeURL = tab => '/api/defense-data';");
+          html = html.replace("const res = await fetch(makeURL('Defensive_Rankings'));", "const res = window.__DEF_DATA__ ? {ok:true,json:()=>Promise.resolve(window.__DEF_DATA__)} : await fetch(makeURL('Defensive_Rankings'));");
+          html = html.replace(/<span class="tag">v[\d.]+ — [^<]+<\/span>/, '');
+          html = html.replace('<div class="header-subtitle">Archetype-weighted composite score with team defense anchor bonus</div>', '');
+
+          // Date fix: regex-based ISO parsing instead of broken replace(' ','T')+'Z'
+          html = html.replace(
+            "document.getElementById('statDate').innerHTML = `<span class=\"unit\">${appData.lastUpdated}</span>`;",
+            "{ let _t = appData.lastUpdated || ''; try { const m = String(_t).match(/(\\d{4})-(\\d{2})-(\\d{2})[ T](\\d{2}):(\\d{2})(?::(\\d{2}))?/); if (m) { const d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +(m[6]||0))); _t = d.toLocaleString('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true})+' ET'; } } catch(e){} document.getElementById('statDate').innerHTML = `<span class=\"unit\">${_t}</span>`; }"
+          );
+
+          html = injectNav(html, 'defense'); html = injectOG(html, 'defense');
+
+          // Phase toggle bar — inserted right after the nav
+          const phaseBar = '<div class="hm-phase-bar" id="hm-phase-bar"><a href="?phase=rs" data-phase="rs" class="hm-phase-btn">Regular Season</a><a href="?phase=po" data-phase="po" class="hm-phase-btn">Playoffs</a></div><script>(function(){var p=(new URLSearchParams(location.search).get("phase")||"rs").toLowerCase();if(!["rs","po"].includes(p))p="rs";document.querySelectorAll("#hm-phase-bar a").forEach(function(a){if(a.dataset.phase===p)a.classList.add("active");});})();<'+'/script>';
+          html = html.replace(/<\/nav>/, '</nav>' + phaseBar);
+
+          // SC/MPG export: RS phase only (avoid polluting TV-page cache with PO scores)
+          html = html.replace('</body>', `<script>(function(){if(window.__DEF_PHASE__&&window.__DEF_PHASE__!=='rs')return;function ex(){var t=document.querySelector('table');if(!t){setTimeout(ex,2000);return;}var rows=t.querySelectorAll('tbody tr');if(rows.length<20){setTimeout(ex,2000);return;}var d={};rows.forEach(function(r){var c=r.querySelectorAll('td');if(c.length>=14){var n=(c[1]||{}).textContent;var v=parseFloat((c[c.length-1]||{}).textContent);if(n&&!isNaN(v)&&v>0)d[n.trim()]=v;}});if(Object.keys(d).length>50){fetch('/api/defense-cache',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(function(){console.log('[DefExport] Cached '+Object.keys(d).length+' players')}).catch(function(e){console.warn('[DefExport]',e)});}else{setTimeout(ex,3000);}}setTimeout(ex,4000);})();</script></body>`);
+
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:HTML_HEADERS});
+      } catch(err) { return safeError('Worker error loading Defense'); }
+    }
+
+    // === REAL VALUE ===
+    if (url.pathname === '/real-value') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/real-value');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(RV_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}});
+          if (!htmlR.ok) return safeError('Failed to fetch Real Value',502);
+          let html = stripCF(await htmlR.text());
+          html = injectNav(html, 'realvalue'); html = injectOG(html, 'realvalue');
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:HTML_HEADERS});
+      } catch(err) { return safeError('Worker error loading Real Value'); }
+    }
+
+    // === DRAFT PREDICTOR ===
+    if (url.pathname === '/draft') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/draft');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(DRAFT_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}});
+          if (!htmlR.ok) return safeError('Failed to fetch Draft',502);
+          let html = stripCF(await htmlR.text());
+          html = html.replace('2025 NBA Draft', '2026 NBA Draft');
+          html = html.replace(/const SHEET_ID = '[^']+';[\s\S]*?const CSV_URL = `[^`]+`;/, "const CSV_URL = '/api/draft-csv';");
+          html = html.replace('<head>', `<head>\n<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">`);
+          const draftOverride = `
+  var _HM_ISO={'United States':'US','France':'FR','Australia':'AU','Canada':'CA','Spain':'ES','Germany':'DE','Serbia':'RS','Greece':'GR','Italy':'IT','Nigerian':'NG','Nigeria':'NG','Croatia':'HR','Lithuania':'LT','Bahamas':'BS','Benin':'BJ','DR Congo':'CD','Dominican Republic':'DO','Estonia':'EE','Finland':'FI','Israel':'IL','Mexico':'MX','Senegal':'SN','Brazil':'BR','Cameroon':'CM','Japan':'JP','South Sudan':'SS','New Zealand':'NZ','Montenegro':'ME','Turkey':'TR','UK':'GB','United Kingdom':'GB','Belgium':'BE','Ivory Coast':'CI','Slovenia':'SI','Latvia':'LV','Jamaica':'JM','Angola':'AO','Mali':'ML','Poland':'PL','China':'CN','Philippines':'PH','Czech Republic':'CZ','Czechia':'CZ','Austria':'AT','Bosnia':'BA','Bosnia and Herzegovina':'BA','Georgia':'GE','Sweden':'SE','Switzerland':'CH','Argentina':'AR','Colombia':'CO','Puerto Rico':'PR','Haiti':'HT','Egypt':'EG','Ukraine':'UA','Russia':'RU','South Korea':'KR','Taiwan':'TW','Denmark':'DK','Norway':'NO','Romania':'RO','Hungary':'HU','Portugal':'PT','Ireland':'IE','Netherlands':'NL','South Africa':'ZA','Ghana':'GH','Congo':'CG','Guinea':'GN','Gabon':'GA','Morocco':'MA','Tunisia':'TN','Algeria':'DZ','Kenya':'KE','India':'IN','Iran':'IR','Lebanon':'LB','Trinidad and Tobago':'TT','US Virgin Islands':'VI','Barbados':'BB','US':'US'};
+  function _hmFlag(c){var code=_HM_ISO[c];if(!code)return'';return'<img src="https://flagcdn.com/w40/'+code.toLowerCase()+'.png" width="20" height="15" style="vertical-align:middle;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,0.08)" alt="'+code+'">';}
+  var _hmBioLookup={}, _hmSheetOrder=[];
+  var _origRender=render;
+  render=function(data){
+    var players=data.players,pickTeamMap=data.pickTeamMap,availableSet=data.availableSet;
+    if(!players.length){document.getElementById('error').textContent='No draft data found.';document.getElementById('error').style.display='block';return;}
+    document.getElementById('statsBar').style.display='none';
+    var wb=document.getElementById('weightsBar');if(wb)wb.style.display='none';
+    var html='<table><thead><tr><th class="col-rank" data-col="finalRank" data-type="num">Pick</th><th data-col="team" data-type="str">Team</th><th></th><th class="col-player" data-col="name" data-type="str" style="text-align:left">Player</th><th>Pos</th><th style="text-align:left">School</th><th style="text-align:left">Age</th></tr></thead><tbody>';
+    players.forEach(function(p){if(!p.finalRank||p.finalRank>60)return;var bio=_hmBioLookup[p.name]||{};var flag=_hmFlag(bio.country)||'';var tier=p.finalRank<=5?'top5':p.finalRank<=10?'top10':p.finalRank<=14?'lottery':p.finalRank<=20?'top20':p.finalRank<=30?'first-round':'second-round';var tierRow='tier-'+(p.finalRank<=5?'5':p.finalRank<=10?'10':p.finalRank<=14?'lottery':p.finalRank<=20?'20':p.finalRank<=30?'first':'second');var teamForPick=pickTeamMap[p.finalRank]||'';
+    html+='<tr class="'+tierRow+'"><td class="rank-cell '+tier+'">'+p.finalRank+'</td><td style="font-family:\\'JetBrains Mono\\',monospace;font-size:0.75rem;font-weight:600;color:var(--text-secondary)">'+teamForPick+'</td><td style="text-align:center;padding:0.3rem 0.15rem;width:28px">'+flag+'</td><td style="text-align:left;padding-right:0.25rem"><span class="player-name">'+p.name+'</span></td><td style="font-family:\\'JetBrains Mono\\',monospace;font-size:0.72rem;color:var(--text-secondary);padding:0.4rem 0.5rem">'+(bio.position||'')+'</td><td style="font-size:0.8rem;color:var(--text-secondary);text-align:left">'+(bio.college||'')+'</td><td style="font-family:\\'JetBrains Mono\\',monospace;font-size:0.72rem;color:var(--text-muted);text-align:left;white-space:nowrap">'+(bio.ageText||'')+'</td></tr>';});
+    html+='</tbody></table>';document.getElementById('tableWrapper').innerHTML=html;document.getElementById('tableWrapper').style.display='block';
+    var undraftedNames=new Set();players.forEach(function(p){if(availableSet.has(p.name))undraftedNames.add(p.name);});if(undraftedNames.size===0)return;
+    var ordered=[];_hmSheetOrder.forEach(function(name){if(undraftedNames.has(name)){ordered.push(name);undraftedNames.delete(name);}});undraftedNames.forEach(function(name){ordered.push(name);});
+    var uhtml='<table style="width:100%"><thead><tr><th></th><th style="text-align:left">Player</th><th>Pos</th><th style="text-align:left">School</th><th style="text-align:left">Age</th></tr></thead><tbody>';
+    ordered.forEach(function(name){var bio=_hmBioLookup[name]||{};var flag=_hmFlag(bio.country)||'';uhtml+='<tr><td style="text-align:center;padding:0.3rem 0.15rem;width:28px">'+flag+'</td><td style="text-align:left;padding-right:0.25rem"><span class="player-name">'+name+'</span></td><td style="font-family:\\'JetBrains Mono\\',monospace;font-size:0.72rem;color:var(--text-secondary);padding:0.4rem 0.5rem">'+(bio.position||'')+'</td><td style="font-size:0.8rem;color:var(--text-secondary);text-align:left">'+(bio.college||'')+'</td><td style="font-family:\\'JetBrains Mono\\',monospace;font-size:0.72rem;color:var(--text-muted);text-align:left;white-space:nowrap">'+(bio.ageText||'')+'</td></tr>';});
+    uhtml+='</tbody></table>';var grid=document.getElementById('undraftedGrid');grid.className='table-wrapper';grid.innerHTML=uhtml;document.getElementById('undraftedBoard').style.display='block';
   };
-
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    const prospect = (row[0] || '').trim();
-    const pickPos = parseInt((row[15] || '').trim()) || 0;
-    const rawTeam = (row[16] || '').trim().toUpperCase();
-
-    if (!prospect) continue;
-    prospects.push(prospect);
-
-    // Bio data cols 26-37 (AA-AL)
-    const bioName    = (row[26] || '').trim();
-    const birthDate  = (row[27] || '').trim();
-    const rawCountry = (row[30] || '').trim();
-    const position   = (row[36] || '').trim();
-    const preDraftTeam = (row[37] || '').trim();
-    const country = NATIONALITY_TO_COUNTRY[rawCountry] || rawCountry;
-    if (bioName && (birthDate || country || position || preDraftTeam)) {
-      prospectBioMap[bioName] = { birthDate, country, position, preDraftTeam };
+  var _origInit=init;
+  init=async function(){try{var response=await fetch(CSV_URL);if(!response.ok)throw new Error('Failed to fetch data');var text=await response.text();var rows=parseCSV(text);if(rows.length>1){for(var i=1;i<rows.length;i++){var bioName=(rows[i][26]||'').trim();if(bioName){_hmBioLookup[bioName]={country:(rows[i][30]||'').trim(),position:(rows[i][36]||'').trim(),college:(rows[i][37]||'').trim(),ageText:(rows[i][34]||'').trim()};}var sheetName=(rows[i][0]||'').trim();if(sheetName)_hmSheetOrder.push(sheetName);}}var data=computeAggregate(text);document.getElementById('loading').style.display='none';render(data);}catch(err){console.error('Error:',err);document.getElementById('loading').style.display='none';document.getElementById('error').textContent='Error loading draft data: '+err.message;document.getElementById('error').style.display='block';}};
+`;
+          html = html.replace('    init();', draftOverride + '\n    init();');
+          html = html.replace('<style>', `<style>\n:root{--bg-primary:#f8f9fa!important;--bg-card:#fff!important;--bg-row-alt:#fafbfc!important;--bg-hover:rgba(59,130,246,0.03)!important;--border:#e2e5e9!important;--text-primary:#1a1a2e!important;--text-secondary:#5a6070!important;--text-muted:#8892a6!important;--accent-gold:#3b82f6!important;--accent-green:#16a34a!important;--accent-blue:#3b82f6!important;--accent-red:#dc2626!important;--accent-purple:#8b5cf6!important;--top5:#f59e0b!important;--top10:#3b82f6!important;--top20:#16a34a!important;--lottery:#8b5cf6!important;--first-round:#8892a6!important;--second-round:#8892a6!important;}\nbody{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif!important;background:var(--bg-primary)!important;color:var(--text-primary)!important;}body::before{display:none!important;}h1{font-size:1.5rem!important;font-weight:800!important;color:var(--text-primary)!important;letter-spacing:-0.02em!important;}h1 span{color:var(--accent-blue)!important;}header{justify-content:flex-start!important;}.header-tag{color:var(--accent-blue)!important;background:rgba(59,130,246,0.07)!important;border-color:rgba(59,130,246,0.15)!important;font-family:'JetBrains Mono',monospace!important;}.subtitle{color:var(--text-secondary)!important;}.stat-item{background:var(--bg-card)!important;border:1px solid var(--border)!important;border-radius:10px!important;}.stat-value{color:var(--accent-blue)!important;}.stat-label{color:var(--text-muted)!important;}.weights-bar{background:var(--bg-card)!important;border:1px solid var(--border)!important;}.table-wrapper{background:var(--bg-card)!important;border:1px solid var(--border)!important;border-radius:10px!important;}thead th{background:#f3f4f6!important;border-bottom:1px solid var(--border)!important;color:var(--text-muted)!important;font-family:'JetBrains Mono',monospace!important;}tbody tr{border-bottom:1px solid var(--border)!important;}tbody tr:hover{background:rgba(59,130,246,0.03)!important;}tbody tr:nth-child(even){background:var(--bg-row-alt)!important;}.player-name{color:var(--text-primary)!important;font-weight:600!important;font-size:0.85rem!important;}.undrafted-board{background:var(--bg-card)!important;border:1px solid var(--border)!important;border-radius:10px!important;}.undrafted-grid.table-wrapper{display:block!important;}.stats-bar{display:none!important;}.container{max-width:1400px!important;padding:1.5rem 2rem!important;}table{table-layout:auto!important;width:100%!important;}th.col-rank{width:42px!important;}.table-wrapper{overflow-x:visible!important;}.loading-spinner{border-color:var(--border)!important;border-top-color:var(--accent-blue)!important;}.loading-text{color:var(--text-secondary)!important;}footer{color:var(--text-muted)!important;}footer a{color:var(--accent-blue)!important;}\n`);
+          html = injectNav(html, 'draft'); html = injectOG(html, 'draft');
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:HTML_HEADERS});
+      } catch(err) { return safeError('Worker error loading Draft'); }
     }
 
-    if (pickPos < 1 || pickPos > 60 || !rawTeam) continue;
-    const abbrev = rawTeam.length <= 3 ? rawTeam : (TEAMS[rawTeam] || rawTeam);
-    pickSlots[pickPos] = { team: abbrev, defaultProspect: prospect };
+    // === SALARY SEASON FINDER ===
+    if (url.pathname === '/salary-season-finder') {
+      const SSF_HEADERS = { ...HTML_HEADERS };
+      delete SSF_HEADERS['Content-Security-Policy'];
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/salary-season-finder');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(SSF_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*'}});
+          if (!htmlR.ok) return safeError('Failed to fetch SSF',502);
+          let html = stripCF(await htmlR.text());
+          html = html.replace('<head>', `<head>\n  <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n  <base href="${SSF_BASE}">`);
+          const historyFix = `<script>
+(function(){
+  var _orig = history.replaceState.bind(history);
+  history.replaceState = function(state, title, url) {
+    try {
+      if (url && typeof url === 'string') {
+        if (url.startsWith('#') || url.startsWith('?') || url.startsWith('/') || !url.includes('://')) {
+          url = '/salary-season-finder' + (url.startsWith('#') || url.startsWith('?') ? '' : '/') + url;
+        }
+        if (url.indexOf('github.io') >= 0) {
+          var u = new URL(url);
+          url = '/salary-season-finder' + (u.hash || '');
+        }
+      }
+      _orig(state, title, url);
+    } catch(e) { /* silently ignore */ }
+  };
+})();
+<` + `/script>`;
+          html = html.replace('<base href=', historyFix + '\n  <base href=');
+          html = injectNav(html, 'salary'); html = injectOG(html, 'salary');
+          const ssfNavScript = `<script>
+(function(){
+  function sp(el, props) {
+    Object.keys(props).forEach(function(k) {
+      el.style.setProperty(k, props[k], 'important');
+    });
   }
-
-  allProspects = prospects;
-  originalPickSlots = pickSlots;
-  currentPickSlots = JSON.parse(JSON.stringify(pickSlots));
-
-  preLotteryOrder = [];
-  for (let i = 1; i <= 14; i++) {
-    if (pickSlots[i]) preLotteryOrder.push(pickSlots[i].team);
-  }
-  console.log(`[DS] Loaded ${prospects.length} prospects, ${Object.keys(pickSlots).length} picks, ${preLotteryOrder.length} lottery teams`);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  LOTTERY LOGIC (mirrors RM's runLotterySimulation + applyPickProtections)
-// ═══════════════════════════════════════════════════════════════════
-
-function getLotteryTeams() {
-  return preLotteryOrder.slice(0, 14).map((team, i) => ({ team, originalSlot: i + 1 }));
-}
-
-function runLotterySimulation() {
-  const lotteryTeams = getLotteryTeams();
-  if (lotteryTeams.length < 14) return null;
-  const remaining = lotteryTeams.map((t, i) => ({ ...t, weight: LOTTERY_ODDS[i] }));
-  const results = [];
-  for (let pick = 1; pick <= 4; pick++) {
-    const totalW = remaining.reduce((s, t) => s + t.weight, 0);
-    let rand = Math.random() * totalW;
-    let winner;
-    for (const t of remaining) {
-      rand -= t.weight;
-      if (rand <= 0) { winner = t; break; }
+  function fixNav(){
+    var nav = document.getElementById('hm-nav');
+    if (!nav) return;
+    sp(nav, {
+      'display':'flex','align-items':'center','background':'#fff',
+      'border-bottom':'1px solid #e2e5e9','padding':'0 1.25rem',
+      'position':'sticky','top':'0','z-index':'9999','width':'100%',
+      'box-sizing':'border-box','font-family':'DM Sans,-apple-system,BlinkMacSystemFont,sans-serif',
+      'margin':'0','height':'auto','min-height':'0','gap':'0','overflow-x':'auto'
+    });
+    var brand = nav.querySelector('.hm-nav-brand');
+    if (brand) sp(brand, {
+      'display':'flex','align-items':'center','font-weight':'800',
+      'font-size':'.95rem','color':'#1a1a2e','padding':'.6rem 0',
+      'margin-right':'1.5rem','text-decoration':'none','white-space':'nowrap',
+      'background':'none','border':'none','box-shadow':'none','cursor':'pointer',
+      'line-height':'1.2','font-family':'DM Sans,-apple-system,BlinkMacSystemFont,sans-serif',
+      'letter-spacing':'0','text-transform':'none'
+    });
+    var svg = nav.querySelector('svg');
+    if (svg) {
+      sp(svg, {
+        'display':'inline-block','width':'20px','height':'20px','max-width':'20px','max-height':'20px',
+        'margin-right':'6px','flex-shrink':'0','visibility':'visible','opacity':'1',
+        'vertical-align':'middle','transform':'none','filter':'none',
+        'overflow':'visible','border':'none','background':'none','padding':'0','margin-top':'0','margin-bottom':'0'
+      });
+      svg.querySelectorAll('circle,path').forEach(function(el) {
+        el.style.setProperty('opacity','1','important');
+        el.style.setProperty('visibility','visible','important');
+        el.style.setProperty('transform','none','important');
+        el.style.setProperty('filter','none','important');
+        el.style.setProperty('transition','none','important');
+      });
     }
-    if (!winner) winner = remaining[remaining.length - 1];
-    results.push({ pick, team: winner.team, originalSlot: winner.originalSlot });
-    remaining.splice(remaining.indexOf(winner), 1);
+    nav.querySelectorAll('.hm-nav-link').forEach(function(a){
+      var isActive = a.classList.contains('hm-nav-active');
+      sp(a, {
+        'display':'inline-block','font-size':'.8rem',
+        'font-weight': isActive ? '600' : '500',
+        'color': isActive ? '#3b82f6' : '#5a6070',
+        'text-decoration':'none','padding':'.55rem .75rem',
+        'border-bottom': isActive ? '2px solid #3b82f6' : '2px solid transparent',
+        'white-space':'nowrap','background':'none','cursor':'pointer',
+        'font-family':'DM Sans,-apple-system,BlinkMacSystemFont,sans-serif',
+        'letter-spacing':'0','text-transform':'none'
+      });
+    });
   }
-  remaining.sort((a, b) => a.originalSlot - b.originalSlot);
-  for (let i = 0; i < remaining.length; i++) {
-    results.push({ pick: 5 + i, team: remaining[i].team, originalSlot: remaining[i].originalSlot });
-  }
-  return results;
-}
+  fixNav();
+  document.addEventListener('DOMContentLoaded', fixNav);
+  window.addEventListener('load', fixNav);
+  setTimeout(fixNav, 500);
+  setTimeout(fixNav, 1500);
+})();
+<` + `/script>`;
+          html = html.replace('</head>', ssfNavScript + '\n</head>');
+          assembled = html;
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:SSF_HEADERS});
+      } catch(err) { return safeError('Worker error loading SSF'); }
+    }
 
-function applyMilNopAtlSwap(results, transfers, pickSlots) {
-  const atlResults = results.filter(r => r.team === 'ATL');
-  const milResult = results.find(r => r.team === 'MIL');
-  if (!atlResults.length || !milResult) return;
+    // === COMPARE PLAYERS ===
+    if (url.pathname === '/compare') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/compare');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(COMPARE_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*','Cache-Control':'no-cache, no-store','Pragma':'no-cache'}});
+          if (!htmlR.ok) return safeError('Failed to fetch Compare Players',502);
+          assembled = await htmlR.text();
+          assembled = assembled.replace('HoopsHype', 'HoopsMatic');
 
-  let nopPick;
-  if (atlResults.length === 1) nopPick = atlResults[0];
-  else nopPick = atlResults.reduce((a, b) => a.originalSlot < b.originalSlot ? a : b);
+          // Compare tracker: monkey-patch pushState to detect comparisons via p1/p2 URL params
+          const compareTracker = `<script>(function(){var _orig=history.pushState.bind(history);history.pushState=function(s,t,u){_orig(s,t,u);try{var p=new URL(u,location.origin).searchParams,p1=p.get('p1'),p2=p.get('p2');if(p1&&p2)fetch('/api/tracker',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool:'compare',player1:p1,player2:p2})}).catch(function(){});}catch(e){}};})();<\/script>`;
+          assembled = assembled.replace('<head>', '<head>'+compareTracker);
 
-  const nopPickNum = nopPick.pick;
-  const milPickNum = milResult.pick;
+          assembled = injectNav(assembled, 'compare');
+          assembled = injectOG(assembled, 'compare');
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:{...HTML_HEADERS,'Content-Security-Policy':"default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src * data:; connect-src 'self' https://jsierrahoopshype.github.io https://cdn.nba.com;"}});
+      } catch(err) { return safeError('Worker error loading Compare Players'); }
+    }
 
-  if (milPickNum < nopPickNum) {
-    // MIL has better pick → ATL gets MIL's pick, MIL gets NOP-conveyed pick
-    const milSlot = pickSlots[milPickNum];
-    const nopSlot = pickSlots[nopPickNum];
-    if (milSlot) pickSlots[milPickNum] = { ...milSlot, team: 'ATL' };
-    if (nopSlot) pickSlots[nopPickNum] = { ...nopSlot, team: 'MIL' };
-    transfers.push({ pick: milPickNum, from: 'MIL', to: 'ATL',
-      label: `ATL gets #${milPickNum} (MIL better than NOP-conveyed #${nopPickNum}), MIL gets #${nopPickNum}` });
-    transfers.push({ pick: nopPickNum, from: 'ATL', to: 'MIL',
-      label: `MIL gets #${nopPickNum} (swap with ATL)` });
-  }
-}
-
-function applyPickProtections(results, pickSlots) {
-  if (!results) return [];
-  const transfers = [];
-  const pickMap = {};
-  for (const r of results) pickMap[r.team] = r.pick;
-
-  for (const prot of PICK_PROTECTIONS) {
-    const pick = pickMap[prot.from];
-    if (pick !== undefined && prot.condition(pick)) {
-      const slot = pickSlots[pick];
-      if (slot && slot.team === prot.from) {
-        pickSlots[pick] = { ...slot, team: prot.to };
-        transfers.push({ pick, from: prot.from, to: prot.to, label: prot.label });
+    // === COMPARE SEASONS ===
+    if (url.pathname === '/compare-seasons') {
+      try {
+        const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/compare-seasons');
+        let assembled = null;
+        if (!url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+        if (!assembled) {
+          const htmlR = await fetch(SEASON_COMPARE_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*','Cache-Control':'no-cache, no-store','Pragma':'no-cache'}});
+          if (!htmlR.ok) return safeError('Failed to fetch Compare Seasons',502);
+          assembled = await htmlR.text();
+          assembled = assembled.replace('HoopsHype', 'HoopsMatic');
+          // Proxy Google Sheets through Worker API: intercept fetch calls
+          const seasonProxy = `<script>
+(function(){
+  var _gidMap = {1169156479:"rsStats",1181534071:"rsStatsPerGame",339737563:"advanced",52077302:"misc",867936474:"scoring",1415078232:"usage",10789411:"clutch",442838927:"bio",439158060:"hustle",1205457990:"shotLocation",1957258468:"defense"};
+  var _origFetch = window.fetch;
+  window.fetch = function(url){
+    if(typeof url==='string' && url.indexOf('docs.google.com')!==-1 && url.indexOf('export?format=csv')!==-1){
+      var m=url.match(/gid=(\\d+)/);
+      if(m && _gidMap[m[1]]){
+        return _origFetch.call(this,'/api/season-data?tab='+_gidMap[m[1]]);
       }
     }
-  }
-  applyMilNopAtlSwap(results, transfers, pickSlots);
-  return transfers;
-}
-
-function applyLotteryResults(results) {
-  // Start from original pick slots (un-touched by previous lottery runs)
-  currentPickSlots = JSON.parse(JSON.stringify(originalPickSlots));
-  // Step 1: assign lottery results
-  for (const r of results) {
-    if (currentPickSlots[r.pick]) {
-      currentPickSlots[r.pick] = { ...currentPickSlots[r.pick], team: r.team };
-    }
-  }
-  // Step 2: pick protections
-  const transfers = applyPickProtections(results, currentPickSlots);
-  STATE.pickTransfers = transfers;
-  return transfers;
-}
-
-function runLottery() {
-  const results = runLotterySimulation();
-  if (!results) {
-    alert('Not enough lottery teams loaded.');
-    return;
-  }
-  STATE.lotteryResults = results;
-  const transfers = applyLotteryResults(results);
-  saveState();
-  renderLottery();
-}
-
-function resetLottery() {
-  STATE.lotteryResults = null;
-  STATE.pickTransfers = [];
-  currentPickSlots = JSON.parse(JSON.stringify(originalPickSlots));
-  saveState();
-  renderLottery();
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  RENDERING
-// ═══════════════════════════════════════════════════════════════════
-
-function teamBadge(team) {
-  const colors = TEAM_COLORS[team] || ['#57534e', '#fff'];
-  const bg = colors[0];
-  const fg = (bg === '#FFFFFF' || bg === '#C4CED4') ? '#000' : '#fff';
-  return `<span class="team-badge" style="background:${bg};color:${fg}">${team}</span>`;
-}
-
-function calcAge(birthDate) {
-  if (!birthDate) return null;
-  const d = new Date(birthDate);
-  if (isNaN(d)) return null;
-  const diff = (Date.now() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
-  return diff > 0 ? diff.toFixed(1) : null;
-}
-
-function prospectBio(name) {
-  const bio = prospectBioMap[name];
-  if (!bio) return '';
-  const bits = [];
-  if (bio.position) bits.push(bio.position);
-  const age = calcAge(bio.birthDate);
-  if (age) bits.push(`${age}y`);
-  if (bio.preDraftTeam) bits.push(bio.preDraftTeam);
-  else if (bio.country) bits.push(bio.country);
-  return bits.join(' · ');
-}
-
-function renderLottery() {
-  // Pre-lottery standings
-  const preEl = document.getElementById('pre-lottery-table');
-  let html = '<table><thead><tr><th>Seed</th><th>Team</th><th>Odds #1</th></tr></thead><tbody>';
-  preLotteryOrder.forEach((team, i) => {
-    const odds = LOTTERY_ODDS[i] ? (LOTTERY_ODDS[i] / 10).toFixed(1) + '%' : '—';
-    html += `<tr><td>${i+1}</td><td>${teamBadge(team)}</td><td>${odds}</td></tr>`;
-  });
-  html += '</tbody></table>';
-  preEl.innerHTML = html;
-
-  // Lottery results
-  const resEl = document.getElementById('lottery-results-table');
-  if (!STATE.lotteryResults) {
-    resEl.innerHTML = '<div class="empty-state"><b>No lottery run yet</b>Click "Run Lottery" to simulate the draft order.</div>';
-    document.getElementById('btn-reset-lottery').disabled = true;
-  } else {
-    let rhtml = '<table><thead><tr><th>Pick</th><th>Seed</th><th>Team</th></tr></thead><tbody>';
-    for (const r of STATE.lotteryResults) {
-      const current = currentPickSlots[r.pick];
-      const finalTeam = current ? current.team : r.team;
-      const changed = finalTeam !== r.team;
-      rhtml += `<tr>
-        <td><span class="pick-num">#${r.pick}</span></td>
-        <td>${r.originalSlot}</td>
-        <td>${teamBadge(r.team)}${changed ? ' <span class="transfer-arrow">→</span> ' + teamBadge(finalTeam) : ''}</td>
-      </tr>`;
-    }
-    rhtml += '</tbody></table>';
-    resEl.innerHTML = rhtml;
-    document.getElementById('btn-reset-lottery').disabled = false;
-  }
-
-  // Transfers panel
-  const tpanel = document.getElementById('transfers-panel');
-  const tlist = document.getElementById('transfers-list');
-  if (STATE.pickTransfers && STATE.pickTransfers.length) {
-    let thtml = '';
-    for (const t of STATE.pickTransfers) {
-      thtml += `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
-        <span class="pick-num">#${t.pick}</span> ${teamBadge(t.from)} <span class="transfer-arrow">→</span> ${teamBadge(t.to)}
-        <span class="transfer-note">${t.label}</span>
-      </div>`;
-    }
-    tlist.innerHTML = thtml;
-    tpanel.style.display = '';
-  } else {
-    tpanel.style.display = 'none';
-  }
-}
-
-function renderDraftBoard() {
-  const boardEl = document.getElementById('draft-board');
-  const statsEl = document.getElementById('draft-stats');
-
-  const picks = Object.keys(currentPickSlots).map(n => parseInt(n)).sort((a,b) => a-b);
-  if (!picks.length) {
-    boardEl.innerHTML = '<div class="empty-state"><b>No picks loaded</b>Run the lottery first (or reload the data).</div>';
-    statsEl.innerHTML = '';
-    return;
-  }
-
-  const selected = STATE.selections || {};
-  const selectedCount = Object.values(selected).filter(Boolean).length;
-  const round1Count = picks.filter(p => p <= 30).length;
-  const round2Count = picks.filter(p => p > 30).length;
-
-  statsEl.innerHTML =
-    `<span><b>${picks.length}</b> total picks</span>` +
-    `<span><b>${round1Count}</b> round 1</span>` +
-    `<span><b>${round2Count}</b> round 2</span>` +
-    `<span><b>${selectedCount}</b> selected</span>`;
-
-  document.getElementById('draft-counter').textContent = `${selectedCount} / ${picks.length} drafted`;
-
-  let html = '';
-  let lastRound = 0;
-  for (const p of picks) {
-    const round = p <= 30 ? 1 : 2;
-    if (round !== lastRound) {
-      html += `<div class="board-round-header">Round ${round}</div>`;
-      lastRound = round;
-    }
-    const slot = currentPickSlots[p];
-    const sel = selected[p];
-    const prospect = sel || null;
-    const isEmpty = !prospect;
-    const bio = prospect ? prospectBio(prospect) : '';
-
-    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'}" onclick="openPicker(${p})">
-      <div class="pick-col">#${p}</div>
-      <div class="team-col">${teamBadge(slot.team)}</div>
-      <div class="prospect-col">
-        <span class="prospect-name">${prospect ? escapeHtml(prospect) : 'Click to select prospect…'}</span>
-        ${bio ? `<span class="prospect-bio">${escapeHtml(bio)}</span>` : ''}
-      </div>
-      <div>${prospect ? `<button class="clear-btn" onclick="event.stopPropagation();clearPick(${p})" title="Clear selection">✕</button>` : ''}</div>
-    </div>`;
-  }
-  boardEl.innerHTML = html;
-}
-
-function escapeHtml(s) {
-  return (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  PROSPECT PICKER
-// ═══════════════════════════════════════════════════════════════════
-
-function openPicker(slot) {
-  _pickerSlot = slot;
-  const teamAbbrev = currentPickSlots[slot]?.team || '—';
-  document.getElementById('picker-title').textContent = `Pick #${slot} — ${teamAbbrev}`;
-  document.getElementById('picker-search').value = '';
-  document.getElementById('picker').style.display = 'flex';
-  renderPicker('');
-  setTimeout(() => document.getElementById('picker-search').focus(), 30);
-}
-
-function closePicker() {
-  _pickerSlot = null;
-  document.getElementById('picker').style.display = 'none';
-}
-
-function renderPicker(filter) {
-  const f = (filter || '').toLowerCase().trim();
-  const takenMap = {};  // name -> pickNum of who took them
-  for (const [pick, name] of Object.entries(STATE.selections || {})) {
-    if (name) takenMap[name] = pick;
-  }
-  const currentAtSlot = STATE.selections[_pickerSlot];
-
-  let html = '';
-  allProspects.forEach((name, idx) => {
-    if (f && !name.toLowerCase().includes(f)) return;
-    const takenAt = takenMap[name];
-    const isCurrent = name === currentAtSlot;
-    const isTakenElsewhere = takenAt && !isCurrent;
-    const cls = isCurrent ? 'current' : (isTakenElsewhere ? 'taken' : '');
-    const clickAttr = isTakenElsewhere ? '' : `onclick="selectProspect('${escapeHtml(name).replace(/'/g,"\\'")}')"`;
-    const bio = prospectBio(name);
-    html += `<div class="picker-item ${cls}" ${clickAttr}>
-      <span class="rnk">#${idx + 1}</span>
-      <div>
-        <div class="name">${escapeHtml(name)}</div>
-        ${bio ? `<div class="bio">${escapeHtml(bio)}</div>` : ''}
-      </div>
-      ${isTakenElsewhere ? `<span class="taken-badge">→ #${takenAt}</span>` : (isCurrent ? '<span class="taken-badge" style="color:var(--orange)">current</span>' : '')}
-    </div>`;
-  });
-  if (!html) html = '<div class="empty-state">No prospects match your search.</div>';
-  document.getElementById('picker-list').innerHTML = html;
-}
-
-function selectProspect(name) {
-  if (!_pickerSlot) return;
-  STATE.selections[_pickerSlot] = name;
-  closePicker();
-  saveState();
-  renderDraftBoard();
-}
-
-function clearPick(slot) {
-  delete STATE.selections[slot];
-  saveState();
-  renderDraftBoard();
-}
-
-function clearAllPicks() {
-  if (!confirm('Clear all draft selections? Lottery results will be kept.')) return;
-  STATE.selections = {};
-  saveState();
-  renderDraftBoard();
-}
-
-function autoFillDefaults() {
-  // Fill every empty pick with the default prospect for that slot (if unclaimed)
-  const taken = new Set(Object.values(STATE.selections).filter(Boolean));
-  for (const [slot, info] of Object.entries(currentPickSlots)) {
-    if (STATE.selections[slot]) continue;
-    const def = info.defaultProspect;
-    if (!def || taken.has(def)) continue;
-    STATE.selections[slot] = def;
-    taken.add(def);
-  }
-  saveState();
-  renderDraftBoard();
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  PHASE NAVIGATION
-// ═══════════════════════════════════════════════════════════════════
-
-function setPhase(phase) {
-  STATE.phase = phase;
-  document.querySelectorAll('.phase-tab').forEach(t =>
-    t.classList.toggle('active', t.dataset.phase === phase));
-  document.getElementById('phase-lottery').style.display = phase === 'lottery' ? '' : 'none';
-  document.getElementById('phase-draft').style.display = phase === 'draft' ? '' : 'none';
-  if (phase === 'lottery') renderLottery();
-  else renderDraftBoard();
-  saveState();
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  URL STATE (encode & decode)
-//  Encoding approach: compact JSON → base64url
-//  Lottery results: [pickNum × 14] encoded by team index
-//  Selections: { pickNum: prospect-index }
-// ═══════════════════════════════════════════════════════════════════
-
-function encodeState() {
-  // Compact representation
-  const compact = {
-    p: STATE.phase === 'draft' ? 1 : 0,
+    return _origFetch.apply(this,arguments);
   };
-  if (STATE.lotteryResults) {
-    // Store only lottery winners (picks 1-4) + implicit ordering for 5-14
-    // Actually store all 14 as [team, originalSlot] pairs for simplicity
-    compact.l = STATE.lotteryResults.map(r => [r.team, r.originalSlot]);
-  }
-  // Selections encoded as { pick: prospectIndex } for compactness
-  const sels = {};
-  for (const [pick, name] of Object.entries(STATE.selections || {})) {
-    if (!name) continue;
-    const idx = allProspects.indexOf(name);
-    sels[pick] = idx >= 0 ? idx : name;  // fall back to name if not found
-  }
-  if (Object.keys(sels).length) compact.s = sels;
-
-  const json = JSON.stringify(compact);
-  // base64url encode
-  const b64 = btoa(unescape(encodeURIComponent(json)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return b64;
-}
-
-function decodeState(encoded) {
-  try {
-    const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64 + '='.repeat((4 - b64.length % 4) % 4);
-    const json = decodeURIComponent(escape(atob(padded)));
-    const compact = JSON.parse(json);
-
-    STATE.phase = compact.p === 1 ? 'draft' : 'lottery';
-    if (compact.l) {
-      STATE.lotteryResults = compact.l.map(([team, orig], i) => ({
-        pick: i + 1, team, originalSlot: orig
-      }));
-      applyLotteryResults(STATE.lotteryResults);
+})();
+<\/script>`;
+          assembled = assembled.replace('<head>', '<head>' + seasonProxy);
+          assembled = injectNav(assembled, 'seasons');
+          assembled = injectOG(assembled, 'seasons');
+          ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}})));
+        }
+        return new Response(assembled, {headers:{...HTML_HEADERS,'Content-Security-Policy':"default-src 'self' https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src * data:; connect-src 'self' https://jsierrahoopshype.github.io https://cdn.nba.com;"}});
+      } catch(err) { return safeError('Worker error loading Compare Seasons'); }
     }
-    if (compact.s) {
-      STATE.selections = {};
-      for (const [pick, val] of Object.entries(compact.s)) {
-        STATE.selections[pick] = typeof val === 'number' ? (allProspects[val] || '') : val;
+
+    // === TRADE MACHINE (landing page) ===
+    try {
+      const isRmMode = url.searchParams.has('rm');
+      const cache = caches.default, ck = new Request('https://hoopsmatic.com/_page_cache/trade-machine');
+      let assembled = null;
+      if (!isRmMode && !url.searchParams.has('nocache')) { const c = await cache.match(ck); if (c) assembled = await c.text(); }
+      if (!assembled) {
+      const htmlR = await fetch(TM_HTML_URL+'?t='+Date.now(),{headers:{'User-Agent':'Mozilla/5.0','Accept':'*/*','Cache-Control':'no-cache, no-store','Pragma':'no-cache'}});
+      if (!htmlR.ok) return safeError('Failed to fetch Trade Machine ('+htmlR.status+')',502);
+      let html = await htmlR.text();
+      if (!html.includes('Trade Machine') && !html.includes('tradeTeams')) return safeError('HTML does not look like Trade Machine',502);
+      html = html.replace(/if\s*\(window\.location\.hostname\.includes\('github\.io'\)\)\s*\{[^}]*\}/, '/* redirect removed */');
+      html = stripCF(html);
+      let inj = '';
+      try { const r = await fetch(CSV_URL,{headers:{'User-Agent':'Mozilla/5.0','Accept':'text/csv,*/*'}}); if(r.ok){inj='<script>window.__INJECTED_CSV_DATA__="'+btoa(unescape(encodeURIComponent(await r.text())))+'";</script>\n';} } catch(e){}
+      if (inj) html = html.replace(/<script/, inj+'<script');
+      html = injectNav(html, 'trade'); html = injectOG(html, 'trade');
+
+      const tmFix = `<style>header{position:sticky;top:0;z-index:50;background:var(--bg);padding-bottom:.5rem}.mobile-trade-teams{display:none}@media(max-width:768px){.mobile-trade-teams{display:flex!important;align-items:center;justify-content:center;gap:.5rem;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:.5rem;font-size:.85rem;font-weight:700}.mobile-trade-teams .mtt-team{display:flex;align-items:center;gap:.35rem}.mobile-trade-teams .mtt-arrow{color:var(--text-secondary);font-size:1.1rem}}.rm-mode .header-actions{display:none!important}.rm-mode header h1{display:none!important}.rm-mode .glossary-section{display:none!important}.rm-mode #tradeRumorsContainer{display:none!important}.rm-mode .contact-footer{display:none!important}.rm-mode #imageModal{display:none!important}.rm-mode .check-rumors-link{display:none!important}.rm-mode #hm-nav{display:none!important}.rm-mode header{padding:.4rem 1rem!important}.rm-mode .pick-item[data-pick-year="2026"]{border:2px solid var(--accent,#3b82f6)!important;background:rgba(59,130,246,.06)!important}</style><script>(function(){var rm=new URLSearchParams(window.location.search).has('rm');if(rm){document.documentElement.classList.add('rm-mode');document.addEventListener('DOMContentLoaded',function(){document.body.classList.add('rm-mode')});}})();<\/script>`;
+      html = html.replace('</head>', tmFix + '</head>');
+
+      const tmTeamStrip = '<script>(function(){function u(){var tc=document.getElementById("tradeContainer");if(!tc)return;var el=document.getElementById("mobileTradeTeams");if(!el){el=document.createElement("div");el.className="mobile-trade-teams";el.id="mobileTradeTeams";tc.insertBefore(el,tc.firstChild);}var sels=tc.querySelectorAll(".team-select");var teams=[];sels.forEach(function(s){if(s.value&&s.selectedIndex>0&&!s.disabled){teams.push(s.options[s.selectedIndex].text);}});if(teams.length<2){el.style.display="none";return;}el.style.display="";el.innerHTML=teams.map(function(t,i){return(i>0?"<span class=mtt-arrow>\\u2194</span>":"")+("<span class=mtt-team>"+t.split(" ").pop()+"</span>");}).join("");}var tid=0;var obs=new MutationObserver(function(){clearTimeout(tid);tid=setTimeout(u,300)});setTimeout(function(){obs.observe(document.getElementById("tradeContainer")||document.body,{childList:true,subtree:true});u();},3000);})();<\/script>';
+      html = html.replace('</body>', tmTeamStrip + '</body>');
+
+      const tmLink = `<script>(function(){var s=document.createElement('style');s.textContent='.hm-ct-icon{display:inline-block;font-size:10px;margin-left:3px;opacity:.3;cursor:pointer;vertical-align:middle;text-decoration:none;transition:opacity .15s;}.hm-ct-icon:hover{opacity:.8;}';document.head.appendChild(s);var seen=new WeakSet();var running=false;function linkify(){if(running)return;running=true;document.querySelectorAll('.player-roster-item[data-player]').forEach(function(el){if(seen.has(el))return;seen.add(el);var name=el.dataset.player;if(!name)return;var nameEl=el.querySelector('.player-roster-name');if(!nameEl)return;var icon=document.createElement('a');icon.className='hm-ct-icon';icon.href='/contracts#'+encodeURIComponent(name);icon.target='_blank';icon.title='View contract';icon.textContent='\\ud83d\\udccb';icon.addEventListener('click',function(e){e.stopPropagation();});nameEl.insertBefore(icon,nameEl.querySelector('.player-info-wrapper'));});running=false;}var tid=0;var obs=new MutationObserver(function(){clearTimeout(tid);tid=setTimeout(linkify,500)});setTimeout(function(){obs.observe(document.getElementById("tradeContainer")||document.body,{childList:true,subtree:true});linkify();},3000);})();<\\/script>`;
+      html = html.replace('</body>', tmLink+'</body>');
+
+      // Trade tracker: when a valid trade is detected, POST player/team data anonymously
+      const tmTracker = `<script>(function(){
+var _lastTradeHash='', _trackDebounce=0;
+function trackTrade(){
+  clearTimeout(_trackDebounce);
+  _trackDebounce = setTimeout(function(){
+    try {
+      var tc=document.getElementById('tradeContainer'); if(!tc) return;
+      // Check if trade is valid (look for success indicators)
+      var valid=tc.querySelector('.trade-valid, .trade-success, [class*="valid"], [class*="success"]');
+      if(!valid){
+        // Fallback: check for green text or checkmark in status area
+        var statusEls=tc.querySelectorAll('.trade-status, .validation-result, [class*="status"]');
+        for(var i=0;i<statusEls.length;i++){
+          var t=(statusEls[i].textContent||'').toLowerCase();
+          if(t.includes('works')||t.includes('valid')||t.includes('legal')){valid=statusEls[i];break;}
+        }
       }
-    }
-    return true;
-  } catch (e) {
-    console.warn('[DS] Failed to decode state:', e);
-    return false;
+      if(!valid) return;
+      // Extract players
+      var players=[], teams=new Set();
+      tc.querySelectorAll('.player-roster-item[data-player]').forEach(function(el){
+        var n=el.dataset.player; if(n) players.push(n);
+      });
+      tc.querySelectorAll('.team-select').forEach(function(s){
+        if(s.value && s.selectedIndex>0) teams.add(s.options[s.selectedIndex].text);
+      });
+      if(players.length<1) return;
+      // Dedupe: don't track same trade twice
+      var hash=players.sort().join('|')+'||'+[...teams].sort().join('|');
+      if(hash===_lastTradeHash) return;
+      _lastTradeHash=hash;
+      fetch('/api/tracker',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({tool:'tm',action:'trade',players:players,teams:[...teams]})
+      }).catch(function(){});
+    }catch(e){}
+  }, 2000);
+}
+// Observe trade container for changes
+setTimeout(function(){
+  var tc=document.getElementById('tradeContainer')||document.body;
+  var obs=new MutationObserver(trackTrade);
+  obs.observe(tc,{childList:true,subtree:true,characterData:true});
+},5000);
+})();<\\/script>`;
+      html = html.replace('</body>', tmTracker+'</body>');
+
+      assembled = html;
+      if (!isRmMode) { ctx.waitUntil(cache.put(ck, new Response(assembled,{headers:{'Content-Type':'text/html;charset=UTF-8','Cache-Control':'public, max-age=300'}}))); }
+      }
+      return new Response(assembled, {headers:HTML_HEADERS});
+    } catch(err) { return safeError('Worker error loading Trade Machine'); }
   }
-}
-
-function saveState() {
-  const encoded = encodeState();
-  // Use replaceState so we don't spam browser history
-  const url = new URL(window.location.href);
-  if (encoded && encoded !== 'eyJwIjowfQ') {  // default empty state
-    url.hash = 's=' + encoded;
-  } else {
-    url.hash = '';
-  }
-  window.history.replaceState(null, '', url.toString());
-}
-
-function loadStateFromURL() {
-  const hash = window.location.hash;
-  if (!hash || !hash.startsWith('#s=')) return false;
-  const encoded = hash.slice(3);
-  return decodeState(encoded);
-}
-
-function showShare() {
-  const url = window.location.href;
-  document.getElementById('share-url-field').value = url;
-  document.getElementById('share-box').classList.add('visible');
-  setTimeout(() => {
-    const f = document.getElementById('share-url-field');
-    f.select();
-    try { document.execCommand('copy'); } catch (e) {}
-  }, 50);
-}
-
-function hideShare() {
-  document.getElementById('share-box').classList.remove('visible');
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  INIT
-// ═══════════════════════════════════════════════════════════════════
-
-document.addEventListener('DOMContentLoaded', async () => {
-  document.querySelectorAll('.phase-tab').forEach(t =>
-    t.addEventListener('click', () => setPhase(t.dataset.phase)));
-
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && _pickerSlot !== null) closePicker();
-  });
-
-  try {
-    await loadData();
-    // After data loaded, try restoring from URL
-    loadStateFromURL();
-    document.getElementById('status').style.display = 'none';
-    setPhase(STATE.phase);
-  } catch (e) {
-    document.getElementById('status').innerHTML =
-      `<b style="color:var(--red)">Failed to load:</b> ${escapeHtml(e.message)}<br>` +
-      `<small>Is <code>${DATA_URL}</code> reachable?</small>`;
-  }
-});
-</script>
-
-</body>
-</html>
+};
