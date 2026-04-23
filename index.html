@@ -150,16 +150,18 @@
     vertical-align: middle;
   }
   .team-logo {
-    width: 22px;
-    height: 22px;
+    width: 32px;
+    height: 32px;
     object-fit: contain;
     flex-shrink: 0;
+    vertical-align: middle;
   }
   .team-logo-sm {
-    width: 18px;
-    height: 18px;
+    width: 24px;
+    height: 24px;
     object-fit: contain;
     flex-shrink: 0;
+    vertical-align: middle;
   }
   .transfer-arrow {
     color: var(--dim);
@@ -202,7 +204,7 @@
   }
   .board-row {
     display: grid;
-    grid-template-columns: 48px 64px 1fr auto;
+    grid-template-columns: 48px 44px 1fr auto;
     gap: 10px;
     align-items: center;
     padding: 8px 16px;
@@ -726,6 +728,25 @@ const PICK_PROTECTIONS = [
   { from: 'ORL', to: 'MEM', condition: () => true, label: 'ORL pick → MEM (unprotected)' },
 ];
 
+// Mock-draft source weights (mirrors Draft Predictor's SOURCE_WEIGHTS).
+// Used by the cascading-simulation AI to compute which prospect each pick
+// slot "would" draft given the remaining pool. Internal use only — exposed
+// via computeCascadingPick() for Phase 2b AI auto-picking.
+const SOURCE_WEIGHTS = {
+  'AGG RANK': 10,
+  'ESPN': 10,
+  'Athletic': 7,
+  'Bleacher': 6,
+  'Babcock': 6,
+  'NBADraft': 3,
+  'CBS Sports': 3,
+  'No Ceilings': 2,
+  'The Ringer': 2,
+  'USAT': 4,
+  'Yahoo!': 2,
+  'SB Nation': 1,
+};
+
 const TEAMS = {
   'Atlanta':'ATL','Boston':'BOS','Brooklyn':'BKN','Charlotte':'CHA','Chicago':'CHI',
   'Cleveland':'CLE','Dallas':'DAL','Denver':'DEN','Detroit':'DET','Golden State':'GSW',
@@ -773,6 +794,10 @@ let originalPickSlots = {};     // pickNum -> { team, defaultProspect } — from
 let currentPickSlots = {};      // pickNum -> { team, defaultProspect } — after lottery + protections
 let prospectBioMap = {};        // name -> { birthDate, country, position, preDraftTeam }
 let preLotteryOrder = [];       // team abbrevs in standings rank order (worst to best)
+
+// Cascading-sim data (populated at data-load time; used by Phase 2b AI)
+let activeSources = [];         // [{ name, weight, colIdx }] sources present in CSV
+let sourceLists = {};           // source name -> [{name, rank}] sorted by that source's ranking
 
 // Persistent mock-draft state (encoded in URL)
 let STATE = {
@@ -825,6 +850,19 @@ async function loadData() {
   const prospects = [];
   const pickSlots = {};
 
+  // ── Source rank column discovery (for cascading AI picker) ──
+  // The first row is the CSV header; match our SOURCE_WEIGHTS keys against
+  // column names so the lookup survives column reordering.
+  const header = rows[0] || [];
+  activeSources = [];
+  for (const [sourceName, weight] of Object.entries(SOURCE_WEIGHTS)) {
+    const idx = header.findIndex(h => (h || '').trim() === sourceName);
+    if (idx >= 0) activeSources.push({ name: sourceName, weight, colIdx: idx });
+  }
+
+  // Collect raw rank data per prospect as we iterate the rows below
+  const rankData = {};  // prospect name -> { [sourceName]: rank }
+
   const NATIONALITY_TO_COUNTRY = {
     'Italian':'Italy','French':'France','Spanish':'Spain','German':'Germany','Australian':'Australia',
     'Canadian':'Canada','Brazilian':'Brazil','Serbian':'Serbia','Croatian':'Croatia','Greek':'Greece',
@@ -846,6 +884,15 @@ async function loadData() {
 
     if (!prospect) continue;
     prospects.push(prospect);
+
+    // Capture ranks from each active source column (for cascading sim)
+    const ranks = {};
+    for (const src of activeSources) {
+      const val = (row[src.colIdx] || '').trim();
+      const r = parseInt(val);
+      if (!isNaN(r) && r > 0) ranks[src.name] = r;
+    }
+    if (Object.keys(ranks).length) rankData[prospect] = ranks;
 
     // Bio data cols 26-37 (AA-AL)
     const bioName    = (row[26] || '').trim();
@@ -871,7 +918,79 @@ async function loadData() {
   for (let i = 1; i <= 14; i++) {
     if (pickSlots[i]) preLotteryOrder.push(pickSlots[i].team);
   }
-  console.log(`[DS] Loaded ${prospects.length} prospects, ${Object.keys(pickSlots).length} picks, ${preLotteryOrder.length} lottery teams`);
+
+  // Build per-source ordered prospect lists (used by AI cascading-pick simulation)
+  sourceLists = {};
+  for (const src of activeSources) {
+    const list = [];
+    for (const name of Object.keys(rankData)) {
+      const r = rankData[name][src.name];
+      if (r) list.push({ name, rank: r });
+    }
+    list.sort((a, b) => a.rank - b.rank);
+    sourceLists[src.name] = list;
+  }
+  console.log(`[DS] Loaded ${prospects.length} prospects, ${Object.keys(pickSlots).length} picks, ${preLotteryOrder.length} lottery teams, ${activeSources.length} sources for AI cascading`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  AI CASCADING-PICK SIMULATION (ported from Draft Predictor)
+//  Used by Phase 2b team-selection AI. Not currently wired to any UI.
+//
+//  Takes the current pool of available prospects, asks each mock-draft
+//  source to "vote" for its top-ranked remaining prospect using that
+//  source's weight, and returns the weighted winner with confidence.
+// ═══════════════════════════════════════════════════════════════════
+
+// Compute the AI's pick given a pool of available prospect names.
+// Returns { name, confidence (0-100), votes: {name: weight, ...} } or null
+// if no source has an opinion on any available prospect.
+function computeCascadingPick(availableSet) {
+  if (!activeSources.length || !availableSet || availableSet.size === 0) return null;
+
+  const totalSourceWeight = activeSources.reduce((s, src) => s + src.weight, 0);
+  const votes = {};
+  for (const src of activeSources) {
+    const list = sourceLists[src.name] || [];
+    const topPick = list.find(e => availableSet.has(e.name));
+    if (topPick) votes[topPick.name] = (votes[topPick.name] || 0) + src.weight;
+  }
+  const candidates = Object.entries(votes)
+    .map(([name, w]) => ({ name, pct: Math.round((w / totalSourceWeight) * 100) }))
+    .sort((a, b) => b.pct - a.pct);
+
+  if (!candidates.length) return null;
+  return { name: candidates[0].name, confidence: candidates[0].pct, votes };
+}
+
+// Convenience: given the current STATE.selections, compute what the AI would
+// pick NEXT (for any specific pick number). Returns { name, confidence } or null.
+function computeCascadingPickForSlot(pickNum) {
+  const taken = new Set(Object.values(STATE.selections || {}).filter(Boolean));
+  const available = new Set(allProspects.filter(p => !taken.has(p)));
+  return computeCascadingPick(available);
+}
+
+// Convenience: simulate the entire cascade from a starting point. Useful for
+// Phase 2b "run full AI draft" or "what would happen if user doesn't pick?"
+// Returns array of { pick, name, confidence } in pick-number order.
+function simulateFullCascade(startingFromPick, existingSelections) {
+  const sels = { ...(existingSelections || STATE.selections || {}) };
+  const picks = Object.keys(currentPickSlots)
+    .map(Number)
+    .filter(p => p >= (startingFromPick || 1))
+    .sort((a, b) => a - b);
+  const out = [];
+  const taken = new Set(Object.values(sels).filter(Boolean));
+  for (const p of picks) {
+    if (sels[p]) continue;
+    const avail = new Set(allProspects.filter(n => !taken.has(n)));
+    const result = computeCascadingPick(avail);
+    if (!result) break;
+    out.push({ pick: p, name: result.name, confidence: result.confidence });
+    taken.add(result.name);
+  }
+  return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1171,14 +1290,14 @@ function renderTvLottery() {
 }
 
 function teamBadgeSmall(team) {
+  const logoUrl = teamLogoURL(team);
+  if (logoUrl) {
+    return `<img src="${logoUrl}" class="team-logo-sm" alt="${team}" title="${team}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'team-badge',textContent:'${team}',style:'background:${TEAM_COLORS[team]?.[0]||'#57534e'};color:#fff;font-size:0.7rem;padding:2px 6px'}))">`;
+  }
   const colors = TEAM_COLORS[team] || ['#57534e', '#fff'];
   const bg = colors[0];
   const fg = (bg === '#FFFFFF' || bg === '#C4CED4') ? '#000' : '#fff';
-  const logoUrl = teamLogoURL(team);
-  const logoHtml = logoUrl
-    ? `<img src="${logoUrl}" class="team-logo-sm" alt="${team}" loading="lazy" onerror="this.style.display='none'">`
-    : '';
-  return `<span class="team-chip">${logoHtml}<span class="team-badge" style="background:${bg};color:${fg};font-size:0.7rem;padding:2px 6px;min-width:32px">${team}</span></span>`;
+  return `<span class="team-badge" style="background:${bg};color:${fg};font-size:0.7rem;padding:2px 6px;min-width:32px">${team}</span>`;
 }
 
 // ── DRAW ROOM MODE ───────────────────────────────────────────────
@@ -1472,14 +1591,15 @@ function renderDrawRoom() {
 // ═══════════════════════════════════════════════════════════════════
 
 function teamBadge(team) {
+  const logoUrl = teamLogoURL(team);
+  if (logoUrl) {
+    return `<img src="${logoUrl}" class="team-logo" alt="${team}" title="${team}" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'team-badge',textContent:'${team}',style:'background:${TEAM_COLORS[team]?.[0]||'#57534e'};color:#fff'}))">`;
+  }
+  // Fallback to colored abbrev if logo missing
   const colors = TEAM_COLORS[team] || ['#57534e', '#fff'];
   const bg = colors[0];
   const fg = (bg === '#FFFFFF' || bg === '#C4CED4') ? '#000' : '#fff';
-  const logoUrl = teamLogoURL(team);
-  const logoHtml = logoUrl
-    ? `<img src="${logoUrl}" class="team-logo" alt="${team}" loading="lazy" onerror="this.style.display='none'">`
-    : '';
-  return `<span class="team-chip">${logoHtml}<span class="team-badge" style="background:${bg};color:${fg}">${team}</span></span>`;
+  return `<span class="team-badge" style="background:${bg};color:${fg}">${team}</span>`;
 }
 
 function teamLogoOnly(team, size) {
