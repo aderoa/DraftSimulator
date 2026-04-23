@@ -143,6 +143,24 @@
     color: white;
     min-width: 42px;
   }
+  .team-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    vertical-align: middle;
+  }
+  .team-logo {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+  .team-logo-sm {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
   .transfer-arrow {
     color: var(--dim);
     font-size: 0.8rem;
@@ -730,6 +748,22 @@ const TEAM_COLORS = {
   TOR:['#CE1141','#000000'],UTA:['#002B5C','#F9A01B'],WAS:['#002B5C','#E31837']
 };
 
+// NBA CDN team IDs (stable, used by stats.nba.com and cdn.nba.com)
+const TEAM_IDS = {
+  ATL:1610612737, BOS:1610612738, BKN:1610612751, CHA:1610612766, CHI:1610612741,
+  CLE:1610612739, DAL:1610612742, DEN:1610612743, DET:1610612765, GSW:1610612744,
+  HOU:1610612745, IND:1610612754, LAC:1610612746, LAL:1610612747, MEM:1610612763,
+  MIA:1610612748, MIL:1610612749, MIN:1610612750, NOP:1610612740, NYK:1610612752,
+  OKC:1610612760, ORL:1610612753, PHI:1610612755, PHX:1610612756, POR:1610612757,
+  SAC:1610612758, SAS:1610612759, TOR:1610612761, UTA:1610612762, WAS:1610612764
+};
+
+function teamLogoURL(abbrev) {
+  const id = TEAM_IDS[abbrev];
+  if (!id) return '';
+  return `https://cdn.nba.com/logos/nba/${id}/global/L/logo.svg`;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════════════════════════
@@ -1058,12 +1092,23 @@ function finalizeTvLottery() {
   renderLottery();
 }
 
+// Skip TV animation — jump straight to finalized results
+function skipTvLottery() {
+  if (!_tvState) return;
+  finalizeTvLottery();
+}
+
 function renderTvLottery() {
   if (!_tvState) return;
   const env = _tvState;
   const body = document.getElementById('active-lottery-body');
   let h = '';
-  h += `<div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;text-align:center">Deputy Commissioner reveals picks in reverse order…</div>`;
+  h += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px">`;
+  h += `<div style="font-size:.75rem;color:var(--muted)">Deputy Commissioner reveals picks in reverse order…</div>`;
+  if (env.currentReveal > 0) {
+    h += `<button class="btn small" onclick="skipTvLottery()" title="Skip animation">⏭ Skip</button>`;
+  }
+  h += `</div>`;
 
   // Determine which teams already revealed (for commercial break)
   const revealedTeams = new Set();
@@ -1129,7 +1174,11 @@ function teamBadgeSmall(team) {
   const colors = TEAM_COLORS[team] || ['#57534e', '#fff'];
   const bg = colors[0];
   const fg = (bg === '#FFFFFF' || bg === '#C4CED4') ? '#000' : '#fff';
-  return `<span class="team-badge" style="background:${bg};color:${fg};font-size:0.7rem;padding:2px 6px;min-width:36px">${team}</span>`;
+  const logoUrl = teamLogoURL(team);
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" class="team-logo-sm" alt="${team}" loading="lazy" onerror="this.style.display='none'">`
+    : '';
+  return `<span class="team-chip">${logoHtml}<span class="team-badge" style="background:${bg};color:${fg};font-size:0.7rem;padding:2px 6px;min-width:32px">${team}</span></span>`;
 }
 
 // ── DRAW ROOM MODE ───────────────────────────────────────────────
@@ -1243,13 +1292,55 @@ function finalizeDrawRoomLottery() {
   renderLottery();
 }
 
+// Skip Draw Room animation — finalize remaining picks via weighted random.
+// Already-resolved picks are preserved; remaining top-4 slots get drawn from
+// the teams who haven't won yet, using their original lottery weights.
+function skipDrawRoomLottery() {
+  const lot = _drawRoomState;
+  if (!lot) return;
+  if (_drawTimer) { clearTimeout(_drawTimer); _drawTimer = null; }
+
+  // Build pool of remaining teams (haven't won a top-4 pick yet)
+  const alreadyWonIdxs = new Set(lot.wonTeamIdxs);
+  const remaining = lot.teams
+    .map((t, i) => ({ ...t, weight: LOTTERY_ODDS[i], idx: i }))
+    .filter(t => !alreadyWonIdxs.has(t.idx));
+
+  // Draw remaining top-4 picks with weighted random
+  const picksToFill = 4 - lot.picksResolved.length;
+  for (let p = 0; p < picksToFill; p++) {
+    const totalW = remaining.reduce((s, t) => s + t.weight, 0);
+    if (totalW <= 0 || !remaining.length) break;
+    let rand = Math.random() * totalW;
+    let winner;
+    for (const t of remaining) {
+      rand -= t.weight;
+      if (rand <= 0) { winner = t; break; }
+    }
+    if (!winner) winner = remaining[remaining.length - 1];
+    lot.picksResolved.push({
+      pick: lot.picksResolved.length + 1,
+      team: winner.team,
+      originalSlot: winner.originalSlot,
+      combo: null,  // no ball draw — just a random pick
+    });
+    remaining.splice(remaining.indexOf(winner), 1);
+  }
+  finalizeDrawRoomLottery();
+}
+
 function renderDrawRoom() {
   const lot = _drawRoomState;
   if (!lot) return;
   const body = document.getElementById('active-lottery-body');
   let h = '';
 
-  h += `<div style="text-align:center;font-size:.85rem;font-weight:700;color:var(--accent);margin-bottom:8px">Drawing for Pick #${lot.currentPick}</div>`;
+  h += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">`;
+  h += `<div style="font-size:.85rem;font-weight:700;color:var(--accent)">Drawing for Pick #${lot.currentPick}</div>`;
+  if (lot.picksResolved.length < 4) {
+    h += `<button class="btn small" onclick="skipDrawRoomLottery()" title="Skip animation">⏭ Skip</button>`;
+  }
+  h += `</div>`;
 
   // Previously resolved picks
   if (lot.picksResolved.length) {
@@ -1384,7 +1475,18 @@ function teamBadge(team) {
   const colors = TEAM_COLORS[team] || ['#57534e', '#fff'];
   const bg = colors[0];
   const fg = (bg === '#FFFFFF' || bg === '#C4CED4') ? '#000' : '#fff';
-  return `<span class="team-badge" style="background:${bg};color:${fg}">${team}</span>`;
+  const logoUrl = teamLogoURL(team);
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" class="team-logo" alt="${team}" loading="lazy" onerror="this.style.display='none'">`
+    : '';
+  return `<span class="team-chip">${logoHtml}<span class="team-badge" style="background:${bg};color:${fg}">${team}</span></span>`;
+}
+
+function teamLogoOnly(team, size) {
+  const url = teamLogoURL(team);
+  if (!url) return '';
+  const sz = size || 20;
+  return `<img src="${url}" alt="${team}" style="width:${sz}px;height:${sz}px" loading="lazy" onerror="this.style.display='none'">`;
 }
 
 function calcAge(birthDate) {
