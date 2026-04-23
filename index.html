@@ -1136,10 +1136,25 @@ function runQuickLottery() {
     alert('Not enough lottery teams loaded.');
     return;
   }
-  STATE.lotteryResults = results;
-  applyLotteryResults(results);
-  saveState();
-  renderLottery();
+  // Staged reveal: show an anticipation panel for ~1.5s, then show final results.
+  document.getElementById('active-lottery').style.display = '';
+  document.getElementById('active-lottery-title').textContent = '🎲 Running Lottery…';
+  document.getElementById('active-lottery-body').innerHTML =
+    `<div style="text-align:center;padding:36px 16px">` +
+      `<div class="spinner" style="display:block;margin:0 auto 12px;width:30px;height:30px"></div>` +
+      `<div style="font-size:0.9rem;font-weight:600;color:var(--muted)">Simulating ping-pong balls…</div>` +
+      `<div style="font-size:0.75rem;color:var(--dim);margin-top:6px">1,000 combinations. 4 balls. One winner.</div>` +
+    `</div>`;
+  document.getElementById('lottery-grid').style.display = 'none';
+
+  setTimeout(() => {
+    STATE.lotteryResults = results;
+    applyLotteryResults(results);
+    document.getElementById('active-lottery').style.display = 'none';
+    document.getElementById('lottery-grid').style.display = '';
+    saveState();
+    renderLottery();
+  }, 1500);
 }
 
 function resetLottery() {
