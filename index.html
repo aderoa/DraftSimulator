@@ -606,6 +606,54 @@
     background: rgba(234,88,12,0.05);
     white-space: nowrap;
   }
+
+  /* ── Draft Recap ── */
+  #draft-recap { margin-bottom: 16px; border: 2px solid var(--accent); background: linear-gradient(135deg, var(--surface), rgba(234,88,12,0.03)); }
+  #draft-recap .panel-header { background: rgba(234,88,12,0.08); color: var(--accent); font-weight: 700; font-size: 1rem; padding: 12px 16px; }
+  .recap-section { padding: 12px 16px; }
+  .recap-section + .recap-section { border-top: 1px solid var(--border); }
+  .recap-heading { font-size: 0.85rem; font-weight: 700; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .recap-list { display: flex; flex-direction: column; gap: 4px; }
+  .recap-row {
+    display: grid;
+    grid-template-columns: 40px 200px 1fr;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 6px;
+    transition: background 0.1s;
+  }
+  .recap-row:hover { background: var(--hover); }
+  .recap-row.recap-user {
+    background: rgba(234,88,12,0.06);
+    border-left: 3px solid var(--accent);
+    padding-left: 5px;
+  }
+  .recap-pick-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.85rem;
+  }
+  .recap-round-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--muted);
+    padding: 2px 6px;
+    background: var(--bg);
+    border-radius: 4px;
+    text-align: center;
+    width: 36px;
+  }
+  .recap-name { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+  .recap-bio { font-size: 0.72rem; color: var(--muted); margin-top: 1px; }
+  .recap-player { min-width: 0; }
+  .recap-team { display: flex; align-items: center; }
+  @media (max-width: 700px) {
+    .recap-row { grid-template-columns: 32px 46px 1fr; gap: 8px; }
+    .recap-row .team-fullname { display: none; }
+  }
   @media (max-width: 700px) {
     .sim-actions .btn.xs { font-size: 0.65rem; padding: 3px 6px; }
     /* On mobile, stack sim buttons vertically */
@@ -980,8 +1028,15 @@
   <!-- ─── DRAFT BOARD PHASE ─── -->
   <div id="phase-draft" style="display:none">
 
+    <!-- Draft recap (shown when draft is complete) -->
+    <div id="draft-recap" class="panel" style="display:none">
+      <div class="panel-header">🏆 Draft Recap</div>
+      <div id="draft-recap-body" class="panel-body"></div>
+    </div>
+
     <div class="toolbar">
       <button class="btn" onclick="clearAllPicks()">Clear All Picks</button>
+      <button class="btn" id="btn-sim-to-next-user" onclick="simToNextUserPick()" style="display:none">⚡ Sim until your next pick</button>
       <button class="btn" id="btn-auto-fill-all" onclick="autoFillAllAI()" style="display:none">⚡ Auto-Fill All 60 Picks</button>
       <div class="spacer"></div>
       <span id="user-team-display-draft"></span>
@@ -1210,6 +1265,19 @@ async function loadData() {
     const pickPos = parseInt((row[15] || '').trim()) || 0;
     const rawTeam = (row[16] || '').trim().toUpperCase();
 
+    // Bio data cols 26-37 (AA-AL) — process FIRST, regardless of col-0 name.
+    // The CSV has a separate "bio block" that's sorted differently from the
+    // draft order, so rows can have bio data without a draft-order name.
+    const bioName     = (row[26] || '').trim();
+    const birthDate   = (row[27] || '').trim();
+    const rawCountry  = (row[30] || '').trim();
+    const position    = (row[36] || '').trim();
+    const preDraftTeam = (row[37] || '').trim();
+    const country = NATIONALITY_TO_COUNTRY[rawCountry] || rawCountry;
+    if (bioName && (birthDate || country || position || preDraftTeam)) {
+      prospectBioMap[bioName] = { birthDate, country, position, preDraftTeam };
+    }
+
     if (!prospect) continue;
     prospects.push(prospect);
 
@@ -1221,17 +1289,6 @@ async function loadData() {
       if (!isNaN(r) && r > 0) ranks[src.name] = r;
     }
     if (Object.keys(ranks).length) rankData[prospect] = ranks;
-
-    // Bio data cols 26-37 (AA-AL)
-    const bioName    = (row[26] || '').trim();
-    const birthDate  = (row[27] || '').trim();
-    const rawCountry = (row[30] || '').trim();
-    const position   = (row[36] || '').trim();
-    const preDraftTeam = (row[37] || '').trim();
-    const country = NATIONALITY_TO_COUNTRY[rawCountry] || rawCountry;
-    if (bioName && (birthDate || country || position || preDraftTeam)) {
-      prospectBioMap[bioName] = { birthDate, country, position, preDraftTeam };
-    }
 
     if (pickPos < 1 || pickPos > 60 || !rawTeam) continue;
     const abbrev = rawTeam.length <= 3 ? rawTeam : (TEAMS[rawTeam] || rawTeam);
@@ -1262,7 +1319,70 @@ async function loadData() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  AI CASCADING-PICK SIMULATION (ported from Draft Predictor)
+//  CONFETTI (self-contained canvas animation, no external library)
+// ═══════════════════════════════════════════════════════════════════
+
+function fireConfetti(opts) {
+  opts = opts || {};
+  const durationMs = opts.durationMs || 1000;
+  const scale = opts.scale || 1;
+  const colors = opts.colors || ['#ea580c', '#fbbf24', '#16a34a', '#3b82f6', '#a855f7', '#ec4899'];
+
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9999;';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+
+  const particles = [];
+  const count = Math.round(120 * scale);
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x: canvas.width / 2 + (Math.random() - 0.5) * 80,
+      y: canvas.height / 2,
+      vx: (Math.random() - 0.5) * 12,
+      vy: Math.random() * -16 - 4,
+      size: Math.random() * 6 + 3,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * Math.PI * 2,
+      rotationSpeed: (Math.random() - 0.5) * 0.3,
+      life: 1,
+    });
+  }
+
+  const start = performance.now();
+  const gravity = 0.4;
+
+  function tick(t) {
+    const elapsed = t - start;
+    const ratio = Math.min(1, elapsed / durationMs);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let alive = 0;
+    for (const p of particles) {
+      p.vy += gravity;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rotation += p.rotationSpeed;
+      p.life = 1 - ratio;
+      if (p.y < canvas.height + 50) alive++;
+
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+      ctx.restore();
+    }
+    if (elapsed < durationMs + 400 && alive > 0) {
+      requestAnimationFrame(tick);
+    } else {
+      canvas.remove();
+    }
+  }
+  requestAnimationFrame(tick);
+}
 //  Used by Phase 2b team-selection AI. Not currently wired to any UI.
 //
 //  Takes the current pool of available prospects, asks each mock-draft
@@ -1482,7 +1602,22 @@ function runQuickLottery() {
     document.getElementById('lottery-grid').style.display = '';
     saveState();
     renderLottery();
+    celebrateUserLotteryMove(results);
   }, 1500);
+}
+
+// If user's team moved up in the lottery, fire confetti.
+function celebrateUserLotteryMove(results) {
+  if (!STATE.userTeam || !results) return;
+  const userResult = results.find(r => r.team === STATE.userTeam);
+  if (!userResult) return;
+  const delta = userResult.originalSlot - userResult.pick;
+  if (delta > 0) {
+    // Bigger celebration if they won #1 or jumped into top 4
+    const scale = userResult.pick === 1 ? 2.0 : (userResult.pick <= 4 ? 1.5 : 1.0);
+    const duration = userResult.pick === 1 ? 2000 : 1200;
+    fireConfetti({ scale, durationMs: duration });
+  }
 }
 
 function resetLottery() {
@@ -1560,11 +1695,13 @@ function finalizeTvLottery() {
   if (_tvTimer) { clearInterval(_tvTimer); _tvTimer = null; }
   STATE.lotteryResults = _tvState.results;
   applyLotteryResults(_tvState.results);
+  const results = _tvState.results;
   _tvState = null;
   document.getElementById('active-lottery').style.display = 'none';
   document.getElementById('lottery-grid').style.display = '';
   saveState();
   renderLottery();
+  celebrateUserLotteryMove(results);
 }
 
 // Skip TV animation — jump straight to finalized results
@@ -1765,6 +1902,7 @@ function finalizeDrawRoomLottery() {
   document.getElementById('lottery-grid').style.display = '';
   saveState();
   renderLottery();
+  celebrateUserLotteryMove(results);
 }
 
 // Skip Draw Room animation — finalize remaining picks via weighted random.
@@ -2063,6 +2201,74 @@ function renderLottery() {
   }
 }
 
+// Render the end-of-draft recap panel showing the Top 14 + user's picks.
+// Shown above the draft board when all 60 picks are filled.
+function renderDraftRecap() {
+  const panel = document.getElementById('draft-recap');
+  const body = document.getElementById('draft-recap-body');
+  if (!panel || !body) return;
+
+  const picks = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
+  const allFilled = picks.length > 0 && picks.every(p => STATE.selections[p]);
+  if (!allFilled) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  // Top 14 picks
+  const top14 = picks.filter(p => p <= 14).sort((a, b) => a - b);
+  let topHtml = '<div class="recap-section"><div class="recap-heading">🏆 Top 14 (Lottery)</div><div class="recap-list">';
+  for (const p of top14) {
+    const slot = currentPickSlots[p];
+    const name = STATE.selections[p];
+    const bio = prospectBio(name);
+    const isUserPick = STATE.userTeam && slot.team === STATE.userTeam;
+    topHtml += `<div class="recap-row ${isUserPick ? 'recap-user' : ''}">
+      <span class="recap-pick-num">#${p}</span>
+      <span class="recap-team">${teamBadge(slot.team)}</span>
+      <div class="recap-player">
+        <div class="recap-name">${escapeHtml(name)}</div>
+        ${bio ? `<div class="recap-bio">${escapeHtml(bio)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+  topHtml += '</div></div>';
+
+  let userHtml = '';
+  if (STATE.userTeam) {
+    const userPicks = picks.filter(p => {
+      const slot = currentPickSlots[p];
+      return slot && slot.team === STATE.userTeam;
+    });
+    if (userPicks.length) {
+      const teamName = TEAM_FULL_NAME[STATE.userTeam] || STATE.userTeam;
+      userHtml = `<div class="recap-section"><div class="recap-heading">${teamLogoOnly(STATE.userTeam, 22)} ${escapeHtml(teamName)} — Your Draft Class</div><div class="recap-list">`;
+      for (const p of userPicks) {
+        const name = STATE.selections[p];
+        const bio = prospectBio(name);
+        userHtml += `<div class="recap-row recap-user">
+          <span class="recap-pick-num">#${p}</span>
+          <span class="recap-round-label">${p <= 30 ? 'R1' : 'R2'}</span>
+          <div class="recap-player">
+            <div class="recap-name">${escapeHtml(name)}</div>
+            ${bio ? `<div class="recap-bio">${escapeHtml(bio)}</div>` : ''}
+          </div>
+        </div>`;
+      }
+      userHtml += '</div></div>';
+    }
+  }
+
+  body.innerHTML = topHtml + userHtml;
+  panel.style.display = '';
+
+  // Fire confetti once per draft-complete
+  if (!STATE._recapShownOnce) {
+    STATE._recapShownOnce = true;
+    fireConfetti({ scale: 1.8, durationMs: 1400 });
+  }
+}
+
 function renderDraftBoard() {
   const boardEl = document.getElementById('draft-board');
   const statsEl = document.getElementById('draft-stats');
@@ -2071,6 +2277,28 @@ function renderDraftBoard() {
   const autoFillBtn = document.getElementById('btn-auto-fill-all');
   if (autoFillBtn) {
     autoFillBtn.style.display = STATE.userTeam ? 'none' : '';
+  }
+  const simToNextBtn = document.getElementById('btn-sim-to-next-user');
+  if (simToNextBtn) {
+    if (!STATE.userTeam) {
+      simToNextBtn.style.display = 'none';
+    } else {
+      // Label based on whether user has any more picks ahead
+      const next = getNextUnfilledUserPick();
+      if (next !== null) {
+        simToNextBtn.style.display = '';
+        simToNextBtn.textContent = `⚡ Sim until your next pick (#${next})`;
+      } else {
+        // No more user picks — offer "Sim until end" instead
+        const anyEmpty = Object.keys(currentPickSlots).some(p => !STATE.selections[p]);
+        if (anyEmpty) {
+          simToNextBtn.style.display = '';
+          simToNextBtn.textContent = '⚡ Sim until end of draft';
+        } else {
+          simToNextBtn.style.display = 'none';
+        }
+      }
+    }
   }
 
   const picks = Object.keys(currentPickSlots).map(n => parseInt(n)).sort((a,b) => a-b);
@@ -2095,6 +2323,14 @@ function renderDraftBoard() {
 
   let html = '';
   let lastRound = 0;
+  // Determine next unfilled pick (lowest pick# with no selection)
+  // Used to restrict "⚡ Sim" button — you can only sim the UPCOMING pick
+  const allPickNums = picks.slice();
+  let nextUnfilled = null;
+  for (const pn of allPickNums) {
+    if (!selected[pn]) { nextUnfilled = pn; break; }
+  }
+
   for (const p of picks) {
     const round = p <= 30 ? 1 : 2;
     if (round !== lastRound) {
@@ -2108,19 +2344,22 @@ function renderDraftBoard() {
     const bio = prospect ? prospectBio(prospect) : '';
     const isUserPick = STATE.userTeam && slot.team === STATE.userTeam;
     const inTeamMode = !!STATE.userTeam;
+    const isNextPick = p === nextUnfilled;
 
     // Build right-side action UI
     let actionHtml = '';
     if (prospect) {
       actionHtml = `<button class="clear-btn" onclick="event.stopPropagation();clearPick(${p})" title="Clear selection">✕</button>`;
     } else if (inTeamMode && !isUserPick) {
-      // Sim buttons only for non-user empty picks in team mode
+      // Only show "⚡ Sim" on the NEXT upcoming pick (can't sim out of order)
+      const simBtnHtml = isNextPick
+        ? `<button class="btn xs" onclick="event.stopPropagation();simSinglePick(${p})" title="AI picks for this slot">⚡ Sim</button>`
+        : '';
       actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
-        <button class="btn xs" onclick="simSinglePick(${p})" title="AI picks for this slot">⚡ Sim</button>
-        <button class="btn xs" onclick="simUntilPick(${p})" title="AI fills all picks before this one (stops at your picks)">⏩ Sim until here</button>
+        ${simBtnHtml}
+        <button class="btn xs" onclick="simUntilPick(${p})" title="AI fills all picks up to and including this one (stops at your picks)">⏩ Sim to here</button>
       </div>`;
     } else if (inTeamMode && isUserPick) {
-      // User pick — prompt to select
       actionHtml = `<span class="your-pick-label">YOUR PICK</span>`;
     }
 
@@ -2135,6 +2374,7 @@ function renderDraftBoard() {
     </div>`;
   }
   boardEl.innerHTML = html;
+  renderDraftRecap();
 }
 
 function escapeHtml(s) {
@@ -2299,6 +2539,7 @@ function handleTeamCtlClick() {
     STATE.lotteryResults = null;
     STATE.pickTransfers = [];
     STATE.selections = {};
+    STATE._recapShownOnce = false;
     currentPickSlots = JSON.parse(JSON.stringify(originalPickSlots));
     _tvState = null;
     _drawRoomState = null;
@@ -2346,16 +2587,17 @@ function renderPicker(filter) {
     const takenAt = takenMap[name];
     const isCurrent = name === currentAtSlot;
     const isTakenElsewhere = takenAt && !isCurrent;
-    const cls = isCurrent ? 'current' : (isTakenElsewhere ? 'taken' : '');
-    const clickAttr = isTakenElsewhere ? '' : `onclick="selectProspect('${escapeHtml(name).replace(/'/g,"\\'")}')"`;
+    // Hide taken-elsewhere prospects entirely
+    if (isTakenElsewhere) return;
+    const cls = isCurrent ? 'current' : '';
     const bio = prospectBio(name);
-    html += `<div class="picker-item ${cls}" ${clickAttr}>
+    html += `<div class="picker-item ${cls}" onclick="selectProspect('${escapeHtml(name).replace(/'/g,"\\'")}')">
       <span class="rnk">#${idx + 1}</span>
       <div>
         <div class="name">${escapeHtml(name)}</div>
         ${bio ? `<div class="bio">${escapeHtml(bio)}</div>` : ''}
       </div>
-      ${isTakenElsewhere ? `<span class="taken-badge">→ #${takenAt}</span>` : (isCurrent ? '<span class="taken-badge" style="color:var(--orange)">current</span>' : '')}
+      ${isCurrent ? '<span class="taken-badge" style="color:var(--orange)">current</span>' : ''}
     </div>`;
   });
   if (!html) html = '<div class="empty-state">No prospects match your search.</div>';
@@ -2364,10 +2606,15 @@ function renderPicker(filter) {
 
 function selectProspect(name) {
   if (!_pickerSlot) return;
+  const slot = currentPickSlots[_pickerSlot];
+  const isUserPick = STATE.userTeam && slot && slot.team === STATE.userTeam;
   STATE.selections[_pickerSlot] = name;
   closePicker();
   saveState();
   renderDraftBoard();
+  if (isUserPick) {
+    fireConfetti({ scale: 1.2, durationMs: 1200 });
+  }
 }
 
 function clearPick(slot) {
@@ -2376,9 +2623,44 @@ function clearPick(slot) {
   renderDraftBoard();
 }
 
+// Return the pick number of the user's next unfilled pick, or null if none remain
+function getNextUnfilledUserPick() {
+  if (!STATE.userTeam) return null;
+  const nums = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
+  for (const p of nums) {
+    const slot = currentPickSlots[p];
+    if (!slot) continue;
+    if (slot.team !== STATE.userTeam) continue;
+    if (STATE.selections[p]) continue;
+    return p;
+  }
+  return null;
+}
+
+// Sim AI picks until the user's next pick (exclusive — leaves user pick empty).
+// If no user picks remain, sim until the end of the draft.
+function simToNextUserPick() {
+  const nextUser = getNextUnfilledUserPick();
+  if (nextUser !== null) {
+    // Sim up to but NOT including the user's next pick
+    simUntilPick(nextUser - 1);
+    // Then scroll to the user pick
+    setTimeout(() => {
+      const el = document.querySelector(`[data-pick="${nextUser}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  } else {
+    // Sim the rest of the draft
+    const nums = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
+    const lastPick = nums[nums.length - 1];
+    if (lastPick) simUntilPick(lastPick);
+  }
+}
+
 function clearAllPicks() {
   if (!confirm('Clear all draft selections? Lottery results will be kept.')) return;
   STATE.selections = {};
+  STATE._recapShownOnce = false;
   saveState();
   renderDraftBoard();
 }
@@ -2409,18 +2691,16 @@ function simSinglePick(pickNum) {
   renderDraftBoard();
 }
 
-// Fill all picks from the lowest unfilled pick UP TO BUT NOT INCLUDING targetPick,
+// Fill all picks from the lowest unfilled pick UP TO AND INCLUDING targetPick,
 // using the AI cascade. If a user-team pick is encountered along the way, it's
 // skipped (left empty) so the user can fill it manually.
-// In team mode: pauses before user's team picks.
-// In GM mode / no team: fills everything up to target (but still exclusive).
 function simUntilPick(targetPick) {
   const pickNums = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
   const taken = new Set(Object.values(STATE.selections).filter(Boolean));
   let stoppedAtUserPick = null;
 
   for (const p of pickNums) {
-    if (p >= targetPick) break;
+    if (p > targetPick) break;
     if (STATE.selections[p]) continue;
     const slot = currentPickSlots[p];
     if (!slot) continue;
@@ -2442,7 +2722,6 @@ function simUntilPick(targetPick) {
   renderDraftBoard();
 
   if (stoppedAtUserPick !== null) {
-    // Scroll to the first user pick that needs attention
     setTimeout(() => {
       const el = document.querySelector(`[data-pick="${stoppedAtUserPick}"]`);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
