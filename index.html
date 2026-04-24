@@ -223,9 +223,11 @@
     align-items: center;
     padding: 8px 16px;
     border-bottom: 1px solid var(--border);
-    cursor: pointer;
+    cursor: default;
     transition: background 0.1s;
   }
+  .board-row.clickable { cursor: pointer; }
+  .board-row.clickable:hover { background: var(--hover); }
   .board-row.drafted { cursor: default; }
   @media (max-width: 700px) {
     .board-row {
@@ -1151,7 +1153,7 @@
   <div id="intro-screen" class="intro-screen" style="display:none">
     <div class="intro-box">
       <h2 class="intro-title">2026 NBA Draft Simulator</h2>
-      <p class="intro-sub">Pick a team to control. Your picks will be highlighted. The rest of the league will auto-draft using aggregated scouting consensus.</p>
+      <p class="intro-sub">Pick a team to control.</p>
 
       <div class="intro-teams-wrap">
         <div class="intro-teams-label">CHOOSE YOUR TEAM</div>
@@ -1163,8 +1165,6 @@
       <button class="btn large" onclick="startFullSim()" style="width:100%">
         🎲 Simulate the Entire Draft (no team control)
       </button>
-
-      <div class="intro-footnote">Spectate a full AI mock draft using cascading scout votes. No picking required.</div>
     </div>
   </div>
 
@@ -1263,7 +1263,7 @@
   </div>
 
   <footer>
-    Powered by <a href="https://hoopsmatic.com">HoopsMatic</a> · Data from Draft Predictor sheet via <code>/api/rm-draft</code>
+    Powered by <a href="https://hoopsmatic.com">HoopsMatic</a>
   </footer>
 
 </div>
@@ -2638,44 +2638,6 @@ async function downloadRecapImage() {
   // Open a minimal loading modal first so the user gets instant feedback
   openImageModal('<div class="img-modal-loading"><div class="spinner" style="display:block;margin:0 auto 12px;width:30px;height:30px"></div>Generating image…</div>');
 
-  // Build an off-screen rendering container. Keep it in the viewport (visible
-  // but offscreen) rather than left:-99999px because html2canvas has issues
-  // with extreme negative positioning in some Chrome versions.
-  const offscreen = document.createElement('div');
-  offscreen.id = 'recap-export-offscreen';
-  offscreen.style.cssText = `
-    position: fixed;
-    top: 0; left: 0;
-    width: 780px;
-    padding: 24px;
-    background: #fff;
-    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-    opacity: 0;
-    pointer-events: none;
-    z-index: -1;
-  `;
-
-  const header = document.createElement('div');
-  header.style.cssText = `
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 0 18px; margin-bottom: 16px;
-    border-bottom: 2px solid #1a1a2e;
-  `;
-  header.innerHTML = `
-    <div>
-      <div style="font-size: 1.5rem; font-weight: 800; color: #1a1a2e; letter-spacing: -0.01em;">2026 NBA Draft Simulator</div>
-      <div style="font-size: 0.82rem; color: #6b7280; margin-top: 2px;">Your mock draft recap</div>
-    </div>
-    <div style="font-size: 0.72rem; color: #9ca3af; font-family: 'JetBrains Mono', monospace;">hoopsmatic.com/draft-simulator</div>
-  `;
-  offscreen.appendChild(header);
-
-  // Clone the recap panel (without action bar)
-  const clone = panel.cloneNode(true);
-  clone.querySelectorAll('.recap-actions').forEach(el => el.remove());
-  offscreen.appendChild(clone);
-  document.body.appendChild(offscreen);
-
   // Proxy NBA logos via Worker (which adds CORS headers), then inline as
   // base64 data: URLs so html2canvas can read them without tainting the canvas.
   function proxyLogoUrl(url) {
@@ -2702,51 +2664,68 @@ async function downloadRecapImage() {
     }
   }
 
-  // Convert every img in the clone to data URI, in parallel
-  const imgs = Array.from(offscreen.querySelectorAll('img'));
-  let failedCount = 0;
-  await Promise.all(imgs.map(async (img) => {
-    const url = img.src;
-    if (url.startsWith('data:')) return;
-    const dataUri = await imageToDataUri(url);
-    if (dataUri) {
-      img.src = dataUri;
-    } else {
-      failedCount++;
-      img.remove();
-    }
-  }));
+  // Temporarily modify the LIVE panel in-place:
+  //   1. Prepend a branded header
+  //   2. Hide the action bar so it's not in the image
+  //   3. Convert all NBA CDN <img> srcs to data URIs so canvas isn't tainted
+  // After rendering, restore everything.
 
-  if (failedCount > 0) {
-    console.warn('[DS] ' + failedCount + ' logos failed to inline (proxy may not be deployed)');
-  }
+  const brandHeader = document.createElement('div');
+  brandHeader.className = 'recap-brand-header';
+  brandHeader.style.cssText = `
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 2px solid #1a1a2e;
+    background: #fff;
+  `;
+  brandHeader.innerHTML = `
+    <div>
+      <div style="font-size:1.3rem;font-weight:800;color:#1a1a2e;letter-spacing:-0.01em">2026 NBA Draft Simulator</div>
+      <div style="font-size:0.78rem;color:#6b7280;margin-top:2px">Your mock draft recap</div>
+    </div>
+    <div style="font-size:0.7rem;color:#9ca3af;font-family:'JetBrains Mono',monospace">hoopsmatic.com/draft-simulator</div>
+  `;
+  panel.insertBefore(brandHeader, panel.firstChild);
 
-  // Brief delay so the browser commits the data-URI src changes before
-  // html2canvas snapshots the DOM
-  await new Promise(r => setTimeout(r, 150));
+  // Hide action bar (remember to restore)
+  const actionBars = Array.from(panel.querySelectorAll('.recap-actions'));
+  const actionOriginalDisplay = actionBars.map(el => el.style.display);
+  actionBars.forEach(el => { el.style.display = 'none'; });
+
+  // Swap img srcs to data URIs. Remember originals so we can restore.
+  const imgs = Array.from(panel.querySelectorAll('img'));
+  const originalSrcs = imgs.map(img => img.src);
+  const needsFetch = imgs.filter(img => !img.src.startsWith('data:'));
 
   try {
-    const canvas = await html2canvas(offscreen, {
+    await Promise.all(needsFetch.map(async (img) => {
+      const dataUri = await imageToDataUri(img.src);
+      if (dataUri) img.src = dataUri;
+      // If fetch fails, keep original URL — html2canvas will try with useCORS
+    }));
+
+    // Brief settle so the browser commits the src changes
+    await new Promise(r => setTimeout(r, 100));
+
+    const canvas = await html2canvas(panel, {
       backgroundColor: '#ffffff',
       scale: 2,
       useCORS: true,
       allowTaint: false,
       logging: false,
-      width: offscreen.offsetWidth || 780,
-      height: offscreen.offsetHeight,
     });
 
     if (canvas.width === 0 || canvas.height === 0) {
       throw new Error('Canvas is empty — rendering failed');
     }
 
-    // Get both forms: data URL for reliable <img> preview (same-origin,
-    // no CSP quirks), and a Blob for clipboard + download.
     const dataUrl = canvas.toDataURL('image/png');
     canvas.toBlob(blob => {
       if (!blob || blob.size < 500) {
         closeImageModal();
-        alert('The image could not be generated. If you see NBA logo errors in the browser console, the /api/logo proxy needs to be deployed on the Worker.');
+        alert('The image could not be generated. The /api/logo Worker proxy may not be deployed.');
         return;
       }
       showImagePreview(dataUrl, blob);
@@ -2756,7 +2735,10 @@ async function downloadRecapImage() {
     closeImageModal();
     alert('Could not generate image: ' + e.message);
   } finally {
-    if (offscreen.parentNode) offscreen.parentNode.removeChild(offscreen);
+    // Restore original panel state
+    if (brandHeader.parentNode) brandHeader.parentNode.removeChild(brandHeader);
+    actionBars.forEach((el, i) => { el.style.display = actionOriginalDisplay[i] || ''; });
+    imgs.forEach((img, i) => { img.src = originalSrcs[i]; });
   }
 }
 
@@ -2913,7 +2895,11 @@ function renderDraftBoard() {
       } else {
         iconEl.textContent = '⏩';
         titleEl.textContent = `Ready to sim until your next pick (#${nextUser})`;
-        subEl.textContent = `AI will fill picks #${firstUnfilled}–#${nextUser - 1} so you can make your next selection.`;
+        const lastPre = nextUser - 1;
+        const rangeLabel = firstUnfilled === lastPre
+          ? `Pick #${firstUnfilled} will be simulated`
+          : `Picks #${firstUnfilled}–#${lastPre} will be simulated`;
+        subEl.textContent = `${rangeLabel} so you can make your next selection.`;
         btnEl.textContent = `⚡ Sim until pick #${nextUser}`;
         finishBanner.dataset.mode = 'next';
         finishBanner.style.display = 'flex';
@@ -3009,11 +2995,18 @@ function renderDraftBoard() {
       }
     }
 
-    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}" data-pick="${p}" ${prospect ? '' : `onclick="openPicker(${p})"`}>
+    // Only the NEXT overall unfilled pick is clickable and shows a prompt.
+    // All other empty rows display blank (non-interactive) so users can't
+    // select a prospect before earlier picks have been made.
+    const clickable = !prospect && isNextPick;
+    const promptText = prospect ? escapeHtml(prospect)
+      : (isNextPick ? (isUserPick ? 'Click to make your selection…' : 'Click to select prospect…') : '');
+
+    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}${clickable ? ' clickable' : ''}" data-pick="${p}" ${clickable ? `onclick="openPicker(${p})"` : ''}>
       <div class="pick-col">#${p}</div>
       <div class="team-col">${teamBadge(slot.team)}</div>
       <div class="prospect-col">
-        <span class="prospect-name">${prospect ? escapeHtml(prospect) : (isUserPick ? 'Click to make your selection…' : 'Click to select prospect…')}</span>
+        <span class="prospect-name">${promptText}</span>
         ${bio ? `<span class="prospect-bio">${escapeHtml(bio)}</span>` : ''}
       </div>
       <div>${actionHtml}</div>
