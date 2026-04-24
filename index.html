@@ -408,6 +408,50 @@
     color: var(--muted);
     flex-shrink: 0;
   }
+  .trade-year-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 18px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.78rem;
+  }
+  .trade-year-toggle-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  .trade-year-toggle-buttons {
+    display: inline-flex;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .trade-year-btn {
+    padding: 5px 12px;
+    background: var(--surface);
+    border: none;
+    border-right: 1px solid var(--border);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .trade-year-btn:last-child { border-right: none; }
+  .trade-year-btn:hover { background: var(--hover); }
+  .trade-year-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
+  .trade-year-hint {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-style: italic;
+  }
   .trade-panels {
     flex: 1;
     display: grid;
@@ -1558,6 +1602,14 @@
         </select>
       </div>
     </div>
+    <div class="trade-year-toggle">
+      <span class="trade-year-toggle-label">Salary year:</span>
+      <div class="trade-year-toggle-buttons" role="tablist">
+        <button type="button" class="trade-year-btn" data-year="2025-26" onclick="setTradeSalaryYear('2025-26')">2025-26</button>
+        <button type="button" class="trade-year-btn" data-year="2026-27" onclick="setTradeSalaryYear('2026-27')">2026-27</button>
+      </div>
+      <span class="trade-year-hint" id="trade-year-hint"></span>
+    </div>
     <div class="trade-panels">
       <div class="trade-panel">
         <div class="trade-panel-header" id="trade-panel-a-header">— sends —</div>
@@ -1679,7 +1731,8 @@ let sourceLists = {};           // source name -> [{name, rank}] sorted by that 
 // Trade system data (Phase 2c): roster + future picks + Real Values.
 // These are loaded lazily after main data — failures don't block boot,
 // but they disable the trade feature.
-let teamRosters = {};           // teamAbbrev -> [{name, position, salary, rat365}]
+let teamRosters = {};           // teamAbbrev -> [{name, position, age, salary2526, salary2627, rat365}]
+let teamDraftRights = {};       // teamAbbrev -> [{name, year}] — historical draft rights to foreign players
 let futurePickInventory = {};   // teamAbbrev -> [{round, year, sure, notes, id}] — 2027+
 let playerValues = {};          // playerName (lowercase) -> Real Value in $
 let slotPickValues = {};        // pickNum (1-60) -> derived Real Value in $
@@ -1770,24 +1823,49 @@ async function loadTradeData() {
       const txt = await r.text();
       const rows = parseCSV(txt);
       let playerCount = 0;
+      let rightsCount = 0;
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         if (!row || row.length < 12) continue;
+
+        // Roster player block (cols 0-32)
         const name = (row[0] || '').trim();
         const cityOrAbbrev = (row[2] || '').trim();
-        if (!name || !cityOrAbbrev) continue;
-        const abbrev = TEAMS[cityOrAbbrev] || (cityOrAbbrev.length <= 3 ? cityOrAbbrev.toUpperCase() : null);
-        if (!abbrev) continue;
-        // Salaries may be "$30,666,666" — parse leniently
-        const salary2025 = parseMoney(row[3]);
-        const rat365 = parseFloat(row[11]) || 0;
-        const position = (row[26] || '').trim();
-        const age = (row[27] || '').trim();
-        if (!teamRosters[abbrev]) teamRosters[abbrev] = [];
-        teamRosters[abbrev].push({ name, position, age, salary: salary2025, rat365 });
-        playerCount++;
+        if (name && cityOrAbbrev) {
+          const abbrev = TEAMS[cityOrAbbrev] || (cityOrAbbrev.length <= 3 ? cityOrAbbrev.toUpperCase() : null);
+          if (abbrev) {
+            // Sheet1 salary columns:
+            //  col 3: 2025-26 salary ("2026")
+            //  col 6: 2026-27 salary ("2027")
+            const salary2526 = parseMoney(row[3]);
+            const salary2627 = parseMoney(row[6]);
+            const rat365 = parseFloat(row[11]) || 0;
+            const position = (row[26] || '').trim();
+            const age = (row[27] || '').trim();
+            if (!teamRosters[abbrev]) teamRosters[abbrev] = [];
+            teamRosters[abbrev].push({
+              name, position, age,
+              salary2526, salary2627,
+              rat365,
+            });
+            playerCount++;
+          }
+        }
+
+        // Draft rights block (cols 71-73: DRAFT RIGHTS, DRAFTED YEAR, TEAM RIGHTS)
+        const drName = (row[71] || '').trim();
+        const drYear = (row[72] || '').trim();
+        const drTeam = (row[73] || '').trim();
+        if (drName && drTeam) {
+          const rAbbrev = TEAMS[drTeam] || (drTeam.length <= 3 ? drTeam.toUpperCase() : null);
+          if (rAbbrev) {
+            if (!teamDraftRights[rAbbrev]) teamDraftRights[rAbbrev] = [];
+            teamDraftRights[rAbbrev].push({ name: drName, year: drYear });
+            rightsCount++;
+          }
+        }
       }
-      console.log(`[DS Trade] Loaded ${playerCount} players across ${Object.keys(teamRosters).length} teams`);
+      console.log(`[DS Trade] Loaded ${playerCount} players + ${rightsCount} draft rights across ${Object.keys(teamRosters).length} teams`);
     }
   } catch (e) {
     console.warn('[DS Trade] roster load failed:', e);
@@ -1815,23 +1893,19 @@ async function loadTradeData() {
     console.warn('[DS Trade] rv-snapshot load failed:', e);
   }
 
-  // 4. Derive slot-based pick values for 2026 picks 1-60.
-  // Pre-lottery each team's 2026 1st has a known RV in rv-snapshot (treated
-  // as a "player" with name "City 2026 1st" — but since picks aren't in
-  // rv-snapshot directly, we use a standard pick-value curve instead. This
-  // matches how trade charts work in practice.
-  //
-  // Rough curve: #1 ≈ $80M, decays to $2M by #30, ~$1M-$0 for 2nd round.
-  // These values are in the same $M units as player Real Value so trades
-  // can be valued apples-to-apples.
+  // 4. Derive slot-based pick values for 2026 picks 1-60, in actual $ units
+  // so they're comparable to player values from rv-snapshot (which are raw $).
+  // Approximate NBA trade chart: #1 ≈ $80M, decays to ~$0.5M at #60.
   for (let p = 1; p <= 60; p++) {
-    if (p === 1) slotPickValues[p] = 80;
-    else if (p <= 3) slotPickValues[p] = 60 - (p - 1) * 8;
-    else if (p <= 10) slotPickValues[p] = 45 - (p - 3) * 3.5;
-    else if (p <= 20) slotPickValues[p] = 20 - (p - 10) * 1.2;
-    else if (p <= 30) slotPickValues[p] = 8 - (p - 20) * 0.5;
-    else if (p <= 45) slotPickValues[p] = 3 - (p - 30) * 0.1;
-    else slotPickValues[p] = Math.max(0.5, 1.5 - (p - 45) * 0.05);
+    let valM;
+    if (p === 1) valM = 80;
+    else if (p <= 3) valM = 60 - (p - 1) * 8;
+    else if (p <= 10) valM = 45 - (p - 3) * 3.5;
+    else if (p <= 20) valM = 20 - (p - 10) * 1.2;
+    else if (p <= 30) valM = 8 - (p - 20) * 0.5;
+    else if (p <= 45) valM = 3 - (p - 30) * 0.1;
+    else valM = Math.max(0.5, 1.5 - (p - 45) * 0.05);
+    slotPickValues[p] = Math.round(valM * 1_000_000);
   }
 
   tradeDataReady = true;
@@ -3739,12 +3813,19 @@ function openTradeModal(pickNum) {
   const slot = currentPickSlots[pickNum];
   if (!slot) return;
 
+  // Default salary year: 2026-27 after June 30 (matches Trade Machine behavior).
+  // Before that date, use 2025-26 so in-season-style trades work right.
+  const now = new Date();
+  const afterJun30 = (now.getMonth() > 5) || (now.getMonth() === 5 && now.getDate() > 30);
+  const defaultYear = afterJun30 ? '2026-27' : '2025-26';
+
   _tradeState = {
     teamA: slot.team,
     teamB: null,
     pickNum: pickNum,
     assetsA: new Set(),
     assetsB: new Set(),
+    salaryYear: defaultYear,
   };
 
   // Render header for Team A
@@ -3763,6 +3844,9 @@ function openTradeModal(pickNum) {
   sel.innerHTML = opts.join('');
   sel.value = '';
 
+  // Reflect default year on the toggle buttons
+  updateTradeYearButtons();
+
   // Reset panels + summary for a fresh modal
   document.getElementById('trade-panel-a-header').textContent = `${TEAM_FULL_NAME[slot.team] || slot.team} sends —`;
   document.getElementById('trade-panel-b-header').textContent = '— sends —';
@@ -3771,6 +3855,45 @@ function openTradeModal(pickNum) {
   resetTradeSummary();
 
   document.getElementById('trade-modal').style.display = 'flex';
+}
+
+// Toggle the salary year used for trade pricing + which picks are shown.
+// In 2026-27 mode, 2033 picks become tradeable (Stepien-safe for every team).
+function setTradeSalaryYear(year) {
+  if (!_tradeState) return;
+  if (year !== '2025-26' && year !== '2026-27') return;
+  _tradeState.salaryYear = year;
+  // Any previously-selected 2033 pick assets are dropped when switching to
+  // 2025-26 (those picks are no longer on offer). Player asset IDs stay valid
+  // either way — we just re-show different salary numbers.
+  if (year === '2025-26') {
+    const drop = (set) => {
+      for (const id of [...set]) {
+        if (id.startsWith('pickFuture-synth-2033')) set.delete(id);
+      }
+    };
+    drop(_tradeState.assetsA);
+    drop(_tradeState.assetsB);
+  }
+  updateTradeYearButtons();
+  if (_tradeState.teamB) {
+    renderTradeAssetsPanel('A');
+    renderTradeAssetsPanel('B');
+    recomputeTradeSummary();
+  }
+}
+
+// Sync the active class + hint text on the year toggle buttons.
+function updateTradeYearButtons() {
+  if (!_tradeState) return;
+  const year = _tradeState.salaryYear;
+  document.querySelectorAll('.trade-year-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.year === year);
+  });
+  const hint = document.getElementById('trade-year-hint');
+  if (hint) hint.textContent = (year === '2026-27')
+    ? '2033 picks tradeable'
+    : '';
 }
 
 function closeTradeModal() {
@@ -3800,15 +3923,21 @@ function onTradePartnerChanged(teamB) {
 }
 
 // Render one side's asset panel. Grouping: 2026 picks, Future picks, Roster.
+// Render one side's asset panel. Order: 2026 picks → Roster players →
+// Future picks → Draft rights. 2026 picks first because they're the most
+// immediately-relevant trade piece on draft night.
 function renderTradeAssetsPanel(side) {
   const team = side === 'A' ? _tradeState.teamA : _tradeState.teamB;
   const body = document.getElementById(`trade-panel-${side.toLowerCase()}-body`);
   const selected = side === 'A' ? _tradeState.assetsA : _tradeState.assetsB;
   if (!team) { body.innerHTML = '<div class="trade-empty-state">Select a trade partner to start.</div>'; return; }
 
+  const salaryYear = _tradeState.salaryYear || '2026-27';
+  const showing2627 = (salaryYear === '2026-27');
+
   let html = '';
 
-  // Section 1: 2026 picks still unfilled
+  // ── Section 1: 2026 picks still unfilled ──
   const pick2026 = [];
   for (const [pnStr, slot] of Object.entries(currentPickSlots)) {
     const pn = parseInt(pnStr);
@@ -3830,17 +3959,62 @@ function renderTradeAssetsPanel(side) {
           <div class="trade-asset-name">#${pn} ${rnd} round pick</div>
           <div class="trade-asset-meta">2026</div>
         </div>
-        <div class="trade-asset-value">$${fmtM(val)}</div>
+        <div class="trade-asset-value">${formatMoney(val)}</div>
       </label>`;
     }
     html += '</div>';
   }
 
-  // Section 2: Future picks (2027+)
-  const futures = futurePickInventory[team] || [];
+  // ── Section 2: Roster players ──
+  const roster = teamRosters[team] || [];
+  if (roster.length) {
+    html += `<div class="trade-asset-section"><div class="trade-asset-section-label">Roster</div>`;
+    // Sort by Real Value descending (best players first)
+    const sorted = [...roster].sort((a, b) => {
+      const va = playerValues[a.name.toLowerCase()] || 0;
+      const vb = playerValues[b.name.toLowerCase()] || 0;
+      return vb - va;
+    });
+    for (const p of sorted) {
+      const assetId = `player-${p.name}`;
+      const val = playerValues[p.name.toLowerCase()] || 0;
+      const isSel = selected.has(assetId);
+      const salary = showing2627 ? (p.salary2627 || 0) : (p.salary2526 || 0);
+      const ageStr = formatAge(p.age);
+      const metaParts = [];
+      if (p.position) metaParts.push(escapeHtml(p.position));
+      if (ageStr) metaParts.push(escapeHtml(ageStr));
+      if (salary) metaParts.push(formatMoney(salary));
+      html += `<label class="trade-asset ${isSel ? 'selected' : ''}">
+        <input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleTradeAsset('${side}', '${assetId}', this.checked)">
+        <div>
+          <div class="trade-asset-name">${escapeHtml(p.name)}</div>
+          ${metaParts.length ? `<div class="trade-asset-meta">${metaParts.join(' · ')}</div>` : ''}
+        </div>
+        <div class="trade-asset-value">${formatMoney(val)}</div>
+      </label>`;
+    }
+    html += '</div>';
+  }
+
+  // ── Section 3: Future picks (2027+) ──
+  // In 2026-27 salary mode, 2033 picks are also tradeable (every team owns
+  // their own 2033 firsts/seconds — Stepien-safe).
+  const futures = [...(futurePickInventory[team] || [])];
+  if (showing2627) {
+    // Synthesize 2033 1st + 2nd — every team owns their own by default since
+    // no trades of 2033 picks exist in our current pick-ownership data.
+    futures.push({
+      id: `synth-2033-1st-${team}`, round: '1st', year: '2033', sure: true,
+      notes: 'Own pick', ownerOriginal: team,
+    });
+    futures.push({
+      id: `synth-2033-2nd-${team}`, round: '2nd', year: '2033', sure: true,
+      notes: 'Own pick', ownerOriginal: team,
+    });
+  }
   if (futures.length) {
     html += `<div class="trade-asset-section"><div class="trade-asset-section-label">Future Picks</div>`;
-    // Sort by year then round
     const sorted = [...futures].sort((a, b) => {
       if (a.year !== b.year) return a.year.localeCompare(b.year);
       return a.round.localeCompare(b.round);
@@ -3857,34 +4031,28 @@ function renderTradeAssetsPanel(side) {
           <div class="trade-asset-name">${fp.year} ${fp.round} round${sureLabel}</div>
           ${notes ? `<div class="trade-asset-meta" title="${escapeHtml(notes)}">${escapeHtml(notes.substring(0, 40))}${notes.length > 40 ? '…' : ''}</div>` : ''}
         </div>
-        <div class="trade-asset-value">$${fmtM(val)}</div>
+        <div class="trade-asset-value">${formatMoney(val)}</div>
       </label>`;
     }
     html += '</div>';
   }
 
-  // Section 3: Roster players
-  const roster = teamRosters[team] || [];
-  if (roster.length) {
-    html += `<div class="trade-asset-section"><div class="trade-asset-section-label">Roster</div>`;
-    // Sort by Real Value descending (best players first)
-    const sorted = [...roster].sort((a, b) => {
-      const va = playerValues[a.name.toLowerCase()] || 0;
-      const vb = playerValues[b.name.toLowerCase()] || 0;
-      return vb - va;
-    });
-    for (const p of sorted) {
-      const assetId = `player-${p.name}`;
-      const val = playerValues[p.name.toLowerCase()] || 0;
+  // ── Section 4: Draft rights (historical picks — foreign players etc.) ──
+  const rights = teamDraftRights[team] || [];
+  if (rights.length) {
+    html += `<div class="trade-asset-section"><div class="trade-asset-section-label">Draft Rights</div>`;
+    const sorted = [...rights].sort((a, b) => (b.year || '').localeCompare(a.year || ''));
+    for (const dr of sorted) {
+      const assetId = `rights-${dr.name}`;
+      const val = 100000;  // near-zero; these are almost all flavor
       const isSel = selected.has(assetId);
-      const meta = [p.position, p.age].filter(Boolean).join(' · ');
       html += `<label class="trade-asset ${isSel ? 'selected' : ''}">
         <input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleTradeAsset('${side}', '${assetId}', this.checked)">
         <div>
-          <div class="trade-asset-name">${escapeHtml(p.name)}</div>
-          ${meta ? `<div class="trade-asset-meta">${escapeHtml(meta)}</div>` : ''}
+          <div class="trade-asset-name">${escapeHtml(dr.name)}</div>
+          <div class="trade-asset-meta">Draft rights${dr.year ? ' · ' + escapeHtml(dr.year) : ''}</div>
         </div>
-        <div class="trade-asset-value">$${fmtM(val)}</div>
+        <div class="trade-asset-value">${formatMoney(val)}</div>
       </label>`;
     }
     html += '</div>';
@@ -3892,6 +4060,19 @@ function renderTradeAssetsPanel(side) {
 
   if (!html) html = '<div class="trade-empty-state">No tradeable assets.</div>';
   body.innerHTML = html;
+}
+
+// Convert an "age" string like "25-37" (years-days) to "25 years and 37 days"
+function formatAge(raw) {
+  if (!raw) return '';
+  const s = String(raw).trim();
+  const m = s.match(/^(\d+)-(\d+)$/);
+  if (m) {
+    const years = parseInt(m[1]);
+    const days = parseInt(m[2]);
+    return `${years} years and ${days} days`;
+  }
+  return s;
 }
 
 function toggleTradeAsset(side, assetId, checked) {
@@ -3907,15 +4088,16 @@ function toggleTradeAsset(side, assetId, checked) {
 }
 
 // Estimate $ value of a future pick. Very rough heuristic for v1:
-// - Conditional picks (sure:false) discounted ~40%
+// - Conditional picks (sure:false) discounted ~45%
 // - 1sts decline ~10% per year out from 2027
 // - 2nds are ~$1.5M flat
+// Returns raw $ (not millions) to match player RV units.
 function estimateFuturePickValue(fp) {
-  if (fp.round === '2nd') return fp.sure ? 1.5 : 0.8;
+  if (fp.round === '2nd') return Math.round((fp.sure ? 1.5 : 0.8) * 1_000_000);
   const yearNum = parseInt(fp.year) || 2027;
   const yearsOut = Math.max(0, yearNum - 2027);
-  const base = 12 * Math.pow(0.9, yearsOut);  // 2027 1st ~$12M, decays
-  return fp.sure ? base : base * 0.55;
+  const baseM = 12 * Math.pow(0.9, yearsOut);  // 2027 1st ~$12M, decays
+  return Math.round((fp.sure ? baseM : baseM * 0.55) * 1_000_000);
 }
 
 function resetTradeSummary() {
@@ -3928,7 +4110,8 @@ function resetTradeSummary() {
   document.getElementById('trade-confirm-btn').disabled = true;
 }
 
-// Sum asset values on each side, show delta, validate (turn 3 will add Stepien)
+// Sum asset values on each side, show delta.
+// Stepien validation will be layered in next turn.
 function recomputeTradeSummary() {
   if (!_tradeState || !_tradeState.teamB) { resetTradeSummary(); return; }
   const sumSide = (team, assets) => {
@@ -3937,6 +4120,14 @@ function recomputeTradeSummary() {
       if (id.startsWith('pick2026-')) {
         const pn = parseInt(id.substring('pick2026-'.length));
         total += slotPickValues[pn] || 0;
+      } else if (id.startsWith('pickFuture-synth-')) {
+        // Synthesized 2033 pick (only shown in 2026-27 mode). Round/year
+        // are encoded in the asset ID itself.
+        const parts = id.split('-');
+        // pickFuture-synth-2033-1st-TEAM → parts: [pickFuture, synth, 2033, 1st, TEAM]
+        const year = parts[2] || '2033';
+        const round = parts[3] || '1st';
+        total += estimateFuturePickValue({ round, year, sure: true });
       } else if (id.startsWith('pickFuture-')) {
         const fpId = id.substring('pickFuture-'.length);
         const fp = (futurePickInventory[team] || []).find(x => x.id === fpId);
@@ -3944,6 +4135,8 @@ function recomputeTradeSummary() {
       } else if (id.startsWith('player-')) {
         const name = id.substring('player-'.length);
         total += playerValues[name.toLowerCase()] || 0;
+      } else if (id.startsWith('rights-')) {
+        total += 100000;  // flat near-zero value; matches renderTradeAssetsPanel
       }
     }
     return total;
@@ -3952,18 +4145,18 @@ function recomputeTradeSummary() {
   const valB = sumSide(_tradeState.teamB, _tradeState.assetsB);
   const delta = valB - valA;  // positive = Team A gains
 
-  document.getElementById('trade-val-a').textContent = '$' + fmtM(valA);
-  document.getElementById('trade-val-b').textContent = '$' + fmtM(valB);
+  document.getElementById('trade-val-a').textContent = formatMoney(valA);
+  document.getElementById('trade-val-b').textContent = formatMoney(valB);
   const d = document.getElementById('trade-val-delta');
   const sign = delta > 0 ? '+' : (delta < 0 ? '−' : '');
-  d.textContent = `Δ ${sign}$${fmtM(Math.abs(delta))}`;
+  d.textContent = `Δ ${sign}${formatMoney(Math.abs(delta)).replace('$', '$')}`;
   d.className = 'trade-summary-delta ' + (delta > 0 ? 'positive' : delta < 0 ? 'negative' : '');
 
   // Enable confirm only if both sides have at least one asset
   const canConfirm = _tradeState.assetsA.size > 0 && _tradeState.assetsB.size > 0;
   document.getElementById('trade-confirm-btn').disabled = !canConfirm;
 
-  // Warnings (turn 3 will add Stepien enforcement)
+  // Warnings (Stepien enforcement layered in next turn)
   document.getElementById('trade-warnings').innerHTML = '';
 }
 
@@ -3973,10 +4166,11 @@ function confirmTrade() {
   closeTradeModal();
 }
 
-// Format a $ amount in millions with up to 1 decimal (no trailing .0)
-function fmtM(val) {
-  const v = Math.round(val * 10) / 10;
-  return (v === Math.floor(v)) ? String(Math.floor(v)) + 'M' : v.toFixed(1) + 'M';
+// Format a $ amount with thousands separators (e.g. 5105127 -> "$5,105,127").
+// Used for player salaries, pick values, and trade summary totals.
+function formatMoney(val) {
+  const n = Math.round(Number(val) || 0);
+  return '$' + n.toLocaleString('en-US');
 }
 
 // Return the pick number of the user's next unfilled pick, or null if none remain
