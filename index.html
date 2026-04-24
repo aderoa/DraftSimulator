@@ -40,6 +40,12 @@
     margin: 0 0 4px 0;
     letter-spacing: -0.02em;
   }
+  .page-title-link {
+    cursor: pointer;
+    transition: color 0.12s;
+    display: inline-block;
+  }
+  .page-title-link:hover { color: var(--accent); }
   .subtitle { color: var(--muted); font-size: 0.95rem; margin: 0; }
 
   /* ── Phase tabs ── */
@@ -697,7 +703,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 14px 18px;
+    padding: 14px 36px 14px 18px;
     background: linear-gradient(135deg, rgba(245,158,11,0.16), rgba(245,158,11,0.08));
     border: 2px solid #f59e0b;
     border-radius: 12px;
@@ -740,6 +746,20 @@
     color: var(--muted);
     margin-top: 2px;
   }
+  .finish-banner-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: transparent;
+    border: none;
+    font-size: 1.1rem;
+    color: var(--muted);
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+  .finish-banner-close:hover { background: rgba(0,0,0,0.06); color: var(--text); }
 
   /* ── Image preview modal ── */
   .img-modal-overlay {
@@ -1111,7 +1131,7 @@
 <div class="container">
 
   <header>
-    <h1>2026 NBA Draft Simulator</h1>
+    <h1 class="page-title-link" onclick="restartSimulation()" title="Click to start over">2026 NBA Draft Simulator</h1>
     <p class="subtitle">Lottery, draft board, shareable mock drafts. <strong>Phase 1 preview</strong> · trades coming soon.</p>
   </header>
 
@@ -1221,17 +1241,19 @@
       <button class="btn" onclick="showShare()">Share Link</button>
     </div>
 
-    <!-- Shown when user's last pick is done but draft isn't complete.
-         Sticky so it stays in view regardless of scroll position. -->
+    <!-- Dynamic floating banner. Content is set by renderDraftBoard based
+         on state: after a user pick with more picks coming ("Ready for your
+         next pick"), or after the user's final pick ("Simulate to end"). -->
     <div id="finish-banner" style="display:none">
       <div class="finish-banner-text">
-        <span class="finish-banner-icon">✅</span>
+        <span class="finish-banner-icon" id="finish-banner-icon">✅</span>
         <div>
-          <div class="finish-banner-title">You've made all your picks</div>
-          <div class="finish-banner-sub">Simulate the rest of the draft to see the full results.</div>
+          <div class="finish-banner-title" id="finish-banner-title"></div>
+          <div class="finish-banner-sub" id="finish-banner-sub"></div>
         </div>
       </div>
-      <button class="btn primary" onclick="simToNextUserPick()">⚡ Sim until end of draft</button>
+      <button class="btn primary" id="finish-banner-btn" onclick="onFinishBannerClick()"></button>
+      <button class="finish-banner-close" onclick="dismissFinishBanner()" title="Dismiss">×</button>
     </div>
 
     <div class="panel">
@@ -2550,6 +2572,7 @@ function renderDraftRecap() {
   const actionBar = `<div class="recap-actions recap-actions-top">
     <button class="btn primary" onclick="downloadRecapImage()">📸 Show Image</button>
     <button class="btn" onclick="showShare()">🔗 Copy Share Link</button>
+    <button class="btn" onclick="restartSimulation()">🔄 Start Over</button>
   </div>`;
   body.innerHTML = actionBar + userHtml + topHtml;
 
@@ -2560,6 +2583,9 @@ function renderDraftRecap() {
     STATE._recapShownOnce = true;
     fireConfetti({ scale: 1.8, durationMs: 1400 });
     trackUserDraftPicks();
+    // Scroll to top so the user sees the recap (not wherever the last
+    // sim-to-end left their scroll position).
+    setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 80);
   }
 }
 
@@ -2714,14 +2740,16 @@ async function downloadRecapImage() {
       throw new Error('Canvas is empty — rendering failed');
     }
 
+    // Get both forms: data URL for reliable <img> preview (same-origin,
+    // no CSP quirks), and a Blob for clipboard + download.
+    const dataUrl = canvas.toDataURL('image/png');
     canvas.toBlob(blob => {
       if (!blob || blob.size < 500) {
         closeImageModal();
         alert('The image could not be generated. If you see NBA logo errors in the browser console, the /api/logo proxy needs to be deployed on the Worker.');
         return;
       }
-      const url = URL.createObjectURL(blob);
-      showImagePreview(url, blob);
+      showImagePreview(dataUrl, blob);
     }, 'image/png');
   } catch (e) {
     console.error('[DS] Failed to generate image:', e);
@@ -2736,16 +2764,16 @@ async function downloadRecapImage() {
 
 let _imageBlob = null, _imageUrl = null;
 
-function showImagePreview(objectUrl, blob) {
+function showImagePreview(dataUrl, blob) {
   _imageBlob = blob;
-  _imageUrl = objectUrl;
+  _imageUrl = null;  // no object URL to revoke
   const html = `
     <div class="img-modal-actions">
       <button class="btn primary" onclick="copyImageToClipboard()" id="btn-copy-img">📋 Copy Image</button>
       <button class="btn" onclick="downloadImageBlob()">⬇️ Download PNG</button>
     </div>
     <div class="img-modal-hint">On mobile, long-press the image to save or share.</div>
-    <img class="img-modal-img" src="${objectUrl}" alt="Draft recap preview" onerror="document.getElementById('img-modal-error').style.display='block';this.style.display='none'">
+    <img class="img-modal-img" src="${dataUrl}" alt="Draft recap preview" onerror="document.getElementById('img-modal-error').style.display='block';this.style.display='none'">
     <div id="img-modal-error" style="display:none;padding:20px;text-align:center;color:var(--red);font-size:0.85rem;border:1px solid var(--red);border-radius:8px;background:rgba(239,68,68,0.05)">⚠️ The preview image couldn't be rendered. Try "Download PNG" below — the file may still be valid.</div>
   `;
   openImageModal(html);
@@ -2841,14 +2869,56 @@ function renderDraftBoard() {
     }
   }
 
-  // Finish banner: show when user has made all picks but draft isn't complete
+  // Floating banner logic — three states:
+  //  1. User made a pick and has MORE picks ahead → "Sim until your next pick"
+  //  2. User made ALL picks, draft not complete → "Sim until end of draft"
+  //  3. Otherwise → hidden
+  // The banner is dismissible per-pick (STATE._bannerDismissedAt stores the
+  // last pick count when user dismissed it) to avoid being annoying.
   const finishBanner = document.getElementById('finish-banner');
   if (finishBanner) {
     const inTeamMode = !!STATE.userTeam;
-    const userDone = inTeamMode && getNextUnfilledUserPick() === null;
     const anyEmpty = Object.keys(currentPickSlots).some(p => !STATE.selections[p]);
-    const showBanner = inTeamMode && userDone && anyEmpty;
-    finishBanner.style.display = showBanner ? 'flex' : 'none';
+    const nextUser = inTeamMode ? getNextUnfilledUserPick() : null;
+    const pickCount = Object.values(STATE.selections).filter(Boolean).length;
+    const dismissedAt = STATE._bannerDismissedAt || 0;
+    const shouldShow = inTeamMode && anyEmpty && pickCount !== dismissedAt;
+
+    const titleEl = document.getElementById('finish-banner-title');
+    const subEl = document.getElementById('finish-banner-sub');
+    const iconEl = document.getElementById('finish-banner-icon');
+    const btnEl = document.getElementById('finish-banner-btn');
+
+    if (!shouldShow) {
+      finishBanner.style.display = 'none';
+    } else if (nextUser === null) {
+      // State 2: user made all their picks
+      iconEl.textContent = '✅';
+      titleEl.textContent = "You've made all your picks";
+      subEl.textContent = 'Simulate the rest of the draft to see the full results.';
+      btnEl.textContent = '⚡ Sim until end of draft';
+      finishBanner.dataset.mode = 'end';
+      finishBanner.style.display = 'flex';
+    } else {
+      // State 1: user has another pick ahead
+      // Only show this banner if there are OTHER teams' picks between now and
+      // the user's next pick (otherwise nothing to sim, user just clicks).
+      const pickNums = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
+      let firstUnfilled = null;
+      for (const pn of pickNums) { if (!STATE.selections[pn]) { firstUnfilled = pn; break; } }
+      const hasPicksToSim = firstUnfilled !== null && firstUnfilled < nextUser;
+
+      if (!hasPicksToSim) {
+        finishBanner.style.display = 'none';
+      } else {
+        iconEl.textContent = '⏩';
+        titleEl.textContent = `Ready to sim until your next pick (#${nextUser})`;
+        subEl.textContent = `AI will fill picks #${firstUnfilled}–#${nextUser - 1} so you can make your next selection.`;
+        btnEl.textContent = `⚡ Sim until pick #${nextUser}`;
+        finishBanner.dataset.mode = 'next';
+        finishBanner.style.display = 'flex';
+      }
+    }
   }
 
   const picks = Object.keys(currentPickSlots).map(n => parseInt(n)).sort((a,b) => a-b);
@@ -3106,25 +3176,37 @@ function updateUserTeamDisplay() {
   });
 }
 
+// Hard reset: clear lottery, draft picks, user team, and return to the
+// intro screen. Used by the toolbar Restart button, the title click, and
+// the recap Start Over button.
+function restartSimulation(opts) {
+  opts = opts || {};
+  if (opts.confirm !== false) {
+    if (!confirm('Start over? This will clear your lottery results, draft picks, and team selection.')) return false;
+  }
+  STATE.userTeam = null;
+  STATE.lotteryResults = null;
+  STATE.pickTransfers = [];
+  STATE.selections = {};
+  STATE._recapShownOnce = false;
+  STATE._trackedOnce = false;
+  STATE._bannerDismissedAt = 0;
+  currentPickSlots = JSON.parse(JSON.stringify(originalPickSlots));
+  _tvState = null;
+  _drawRoomState = null;
+  if (_tvTimer) { clearInterval(_tvTimer); _tvTimer = null; }
+  if (_drawTimer) { clearTimeout(_drawTimer); _drawTimer = null; }
+  setPhase('lottery');
+  saveState();
+  showIntroScreen();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  return true;
+}
+
 // Team control button click — opens picker if no team, or restarts sim if team already chosen
 function handleTeamCtlClick() {
   if (STATE.userTeam) {
-    // Restart flow: clear everything and show intro screen
-    if (!confirm('Restart the simulation? This will clear your lottery results, draft picks, and team selection.')) return;
-    STATE.userTeam = null;
-    STATE.lotteryResults = null;
-    STATE.pickTransfers = [];
-    STATE.selections = {};
-    STATE._recapShownOnce = false;
-    STATE._trackedOnce = false;
-    currentPickSlots = JSON.parse(JSON.stringify(originalPickSlots));
-    _tvState = null;
-    _drawRoomState = null;
-    if (_tvTimer) { clearInterval(_tvTimer); _tvTimer = null; }
-    if (_drawTimer) { clearTimeout(_drawTimer); _drawTimer = null; }
-    setPhase('lottery');
-    saveState();
-    showIntroScreen();
+    restartSimulation();
   } else {
     openTeamPicker();
   }
@@ -3216,6 +3298,25 @@ function getNextUnfilledUserPick() {
 
 // Sim AI picks until the user's next pick (exclusive — leaves user pick empty).
 // If no user picks remain, sim until the end of the draft.
+// Floating banner click handler — dispatches based on current mode.
+function onFinishBannerClick() {
+  const banner = document.getElementById('finish-banner');
+  const mode = banner ? banner.dataset.mode : null;
+  // Both 'next' and 'end' modes use simToNextUserPick — it already
+  // handles the "no more user picks" case by simming to the end.
+  simToNextUserPick();
+}
+
+// Dismiss banner until the next pick-count change. Sets a marker so the
+// banner won't reappear until the user makes another pick (at which point
+// the pick count differs from the dismissal snapshot).
+function dismissFinishBanner() {
+  STATE._bannerDismissedAt = Object.values(STATE.selections).filter(Boolean).length;
+  saveState();
+  const banner = document.getElementById('finish-banner');
+  if (banner) banner.style.display = 'none';
+}
+
 function simToNextUserPick() {
   const nextUser = getNextUnfilledUserPick();
   if (nextUser !== null) {
@@ -3239,6 +3340,7 @@ function clearAllPicks() {
   STATE.selections = {};
   STATE._recapShownOnce = false;
   STATE._trackedOnce = false;
+  STATE._bannerDismissedAt = 0;
   saveState();
   renderDraftBoard();
 }
