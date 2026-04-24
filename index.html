@@ -220,6 +220,7 @@
     cursor: pointer;
     transition: background 0.1s;
   }
+  .board-row.drafted { cursor: default; }
   @media (max-width: 700px) {
     .board-row {
       grid-template-columns: 40px 46px 1fr auto;
@@ -682,18 +683,38 @@
     flex-wrap: wrap;
   }
 
-  /* ── Finish-draft banner (shows when user's last pick is done) ── */
+  /* ── Finish-draft banner (shows when user's last pick is done).
+     Fixed to the bottom of the viewport so it's always visible regardless
+     of where the user has scrolled in the draft board. ── */
   #finish-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
     padding: 14px 18px;
-    margin-bottom: 14px;
-    background: linear-gradient(135deg, rgba(245,158,11,0.10), rgba(245,158,11,0.04));
-    border: 1px solid #f59e0b;
-    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(245,158,11,0.16), rgba(245,158,11,0.08));
+    border: 2px solid #f59e0b;
+    border-radius: 12px;
     flex-wrap: wrap;
+    position: fixed;
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+    max-width: 720px;
+    margin: 0 auto;
+    z-index: 100;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    backdrop-filter: blur(6px);
+    animation: finishBannerSlide 0.3s ease-out;
+  }
+  @keyframes finishBannerSlide {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @media (max-width: 700px) {
+    #finish-banner { left: 10px; right: 10px; bottom: 10px; padding: 12px 14px; }
+    .finish-banner-title { font-size: 0.85rem; }
+    .finish-banner-sub { font-size: 0.72rem; }
   }
   .finish-banner-text {
     display: flex;
@@ -750,6 +771,13 @@
   }
   .img-modal-close:hover { background: var(--hover); color: var(--text); }
   .img-modal-content { padding-top: 8px; }
+  .img-modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 4px 0 14px;
+    flex-wrap: wrap;
+  }
   .img-modal-img {
     display: block;
     width: 100%;
@@ -757,13 +785,7 @@
     border-radius: 8px;
     border: 1px solid var(--border);
     background: #fff;
-  }
-  .img-modal-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
     margin-top: 14px;
-    flex-wrap: wrap;
   }
   .btn.success {
     background: #16a34a !important;
@@ -1172,18 +1194,6 @@
       <div id="draft-recap-body" class="panel-body"></div>
     </div>
 
-    <!-- Shown when user's last pick is done but draft isn't complete -->
-    <div id="finish-banner" style="display:none">
-      <div class="finish-banner-text">
-        <span class="finish-banner-icon">✅</span>
-        <div>
-          <div class="finish-banner-title">You've made all your picks</div>
-          <div class="finish-banner-sub">Simulate the rest of the draft to see the full results.</div>
-        </div>
-      </div>
-      <button class="btn primary" onclick="simToNextUserPick()">⚡ Sim until end of draft</button>
-    </div>
-
     <div class="toolbar">
       <button class="btn" onclick="clearAllPicks()">Clear All Picks</button>
       <button class="btn" id="btn-sim-to-next-user" onclick="simToNextUserPick()" style="display:none">⚡ Sim until your next pick</button>
@@ -1193,6 +1203,19 @@
       <button class="btn team-ctl-btn" id="btn-team-ctl-draft" onclick="handleTeamCtlClick()">🏀 Select Team</button>
       <span id="draft-counter" style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--muted)"></span>
       <button class="btn" onclick="showShare()">Share Link</button>
+    </div>
+
+    <!-- Shown when user's last pick is done but draft isn't complete.
+         Sticky so it stays in view regardless of scroll position. -->
+    <div id="finish-banner" style="display:none">
+      <div class="finish-banner-text">
+        <span class="finish-banner-icon">✅</span>
+        <div>
+          <div class="finish-banner-title">You've made all your picks</div>
+          <div class="finish-banner-sub">Simulate the rest of the draft to see the full results.</div>
+        </div>
+      </div>
+      <button class="btn primary" onclick="simToNextUserPick()">⚡ Sim until end of draft</button>
     </div>
 
     <div class="panel">
@@ -1550,42 +1573,71 @@ function fireConfetti(opts) {
 //
 // Adds a 5% randomness floor so high-consensus picks aren't always chalk.
 // E.g., a 100% lock has a 95% chance of being picked — the 5% "slip" goes
-// to the runner-up (next-highest-voted prospect in the cascade).
+// to the next-highest-voted prospect(s) in the cascade.
 function computeCascadingPick(availableSet) {
   if (!activeSources.length || !availableSet || availableSet.size === 0) return null;
 
   const totalSourceWeight = activeSources.reduce((s, src) => s + src.weight, 0);
+
+  // Primary voting: each source votes for its top available prospect
   const votes = {};
   for (const src of activeSources) {
     const list = sourceLists[src.name] || [];
     const topPick = list.find(e => availableSet.has(e.name));
     if (topPick) votes[topPick.name] = (votes[topPick.name] || 0) + src.weight;
   }
+
+  // Build RUNNER-UP list too: for each source, who's their #2 available
+  // prospect. This gives us alternative slip targets even when the primary
+  // vote is unanimous (e.g., every source has Flagg #1 — but they disagree
+  // on who's #2, and that disagreement is the pool for a slip).
+  const runnerUpVotes = {};
+  for (const src of activeSources) {
+    const list = sourceLists[src.name] || [];
+    // Skip the source's top available pick; find their second-highest
+    let firstFound = false;
+    for (const e of list) {
+      if (!availableSet.has(e.name)) continue;
+      if (!firstFound) { firstFound = true; continue; }
+      runnerUpVotes[e.name] = (runnerUpVotes[e.name] || 0) + src.weight;
+      break;
+    }
+  }
+
   const candidates = Object.entries(votes)
     .map(([name, w]) => ({ name, pct: Math.round((w / totalSourceWeight) * 100) }))
     .sort((a, b) => b.pct - a.pct);
 
   if (!candidates.length) return null;
 
-  // 5% randomness floor: even a 100% lock has a 5% chance of slipping to the
-  // runner-up. If the cascade produced more than one candidate, roll the dice.
-  // When the slip triggers, pick from the remaining candidates weighted by
-  // their own vote percentages (so the cascade's #2 is the most likely
-  // alternative, then #3, etc. — "always prefer higher-tier alternatives").
+  // 5% randomness floor. The slip pool includes: (a) primary-vote runners-up
+  // (if any), and (b) the runner-up candidates from individual source ballots.
+  // This lets a unanimous pick (100% consensus on one name) still occasionally
+  // slip to whoever scouts had as their second choice.
   const SLIP_CHANCE = 0.05;
-  if (candidates.length > 1 && Math.random() < SLIP_CHANCE) {
-    const alternatives = candidates.slice(1);
-    // Weighted random among the alternatives using their vote percentages.
-    // Fall back to equal weight if all alternatives have 0 confidence
-    // (shouldn't happen given the filter, but safe).
-    const altTotalWeight = alternatives.reduce((s, c) => s + Math.max(c.pct, 1), 0);
-    let rand = Math.random() * altTotalWeight;
-    let chosen = alternatives[0];
-    for (const c of alternatives) {
-      rand -= Math.max(c.pct, 1);
-      if (rand <= 0) { chosen = c; break; }
+  if (Math.random() < SLIP_CHANCE) {
+    // Build merged alternative pool (primary runners-up + per-source #2 picks)
+    const altPool = {};
+    for (const c of candidates.slice(1)) altPool[c.name] = c.pct;
+    for (const [name, w] of Object.entries(runnerUpVotes)) {
+      if (name === candidates[0].name) continue;  // never slip to "winner"
+      const pct = Math.round((w / totalSourceWeight) * 100);
+      altPool[name] = Math.max(altPool[name] || 0, pct);
     }
-    return { name: chosen.name, confidence: chosen.pct, votes, slipped: true };
+    const alts = Object.entries(altPool)
+      .map(([name, pct]) => ({ name, pct }))
+      .sort((a, b) => b.pct - a.pct);
+
+    if (alts.length > 0) {
+      const altTotalWeight = alts.reduce((s, c) => s + Math.max(c.pct, 1), 0);
+      let rand = Math.random() * altTotalWeight;
+      let chosen = alts[0];
+      for (const c of alts) {
+        rand -= Math.max(c.pct, 1);
+        if (rand <= 0) { chosen = c; break; }
+      }
+      return { name: chosen.name, confidence: chosen.pct, votes, slipped: true };
+    }
   }
 
   return { name: candidates[0].name, confidence: candidates[0].pct, votes };
@@ -2553,11 +2605,38 @@ async function downloadRecapImage() {
   // Remove the action bar from the clone (buttons shouldn't be in the image)
   const actionBar = clone.querySelector('.recap-actions');
   if (actionBar) actionBar.remove();
+
+  // Critical for Chrome: all images must be reloaded with crossOrigin set
+  // BEFORE html2canvas sees them, otherwise the canvas gets tainted and
+  // .toBlob() silently produces an empty/broken image. We replace each
+  // <img> in the clone with a fresh Image() that has crossOrigin set and
+  // wait for all to load before rasterizing.
+  const imgs = Array.from(clone.querySelectorAll('img'));
+  const imageLoadPromises = imgs.map(oldImg => new Promise((resolve) => {
+    const fresh = new Image();
+    fresh.crossOrigin = 'anonymous';
+    fresh.style.cssText = oldImg.style.cssText;
+    fresh.className = oldImg.className;
+    fresh.width = oldImg.width || oldImg.naturalWidth || 24;
+    fresh.height = oldImg.height || oldImg.naturalHeight || 24;
+    fresh.onload = () => {
+      oldImg.replaceWith(fresh);
+      resolve();
+    };
+    fresh.onerror = () => {
+      // If a logo fails CORS entirely, just remove the img so the layout
+      // doesn't show a broken-image icon in the output
+      oldImg.remove();
+      resolve();
+    };
+    fresh.src = oldImg.src;
+  }));
+
   offscreen.appendChild(clone);
   document.body.appendChild(offscreen);
 
-  // Small delay to ensure images load before rasterizing
-  await new Promise(r => setTimeout(r, 100));
+  // Wait for all images to reload with CORS before rasterizing
+  await Promise.all(imageLoadPromises);
 
   try {
     const canvas = await html2canvas(offscreen, {
@@ -2595,12 +2674,12 @@ function showImagePreview(objectUrl, blob) {
   _imageBlob = blob;
   _imageUrl = objectUrl;
   const html = `
-    <img class="img-modal-img" src="${objectUrl}" alt="Draft recap preview">
     <div class="img-modal-actions">
       <button class="btn primary" onclick="copyImageToClipboard()" id="btn-copy-img">📋 Copy Image</button>
       <button class="btn" onclick="downloadImageBlob()">⬇️ Download PNG</button>
     </div>
     <div class="img-modal-hint">On mobile, long-press the image to save or share.</div>
+    <img class="img-modal-img" src="${objectUrl}" alt="Draft recap preview">
   `;
   openImageModal(html);
 }
@@ -2758,7 +2837,8 @@ function renderDraftBoard() {
     // Build right-side action UI
     let actionHtml = '';
     if (prospect) {
-      actionHtml = `<button class="clear-btn" onclick="event.stopPropagation();clearPick(${p})" title="Clear selection">✕</button>`;
+      // Pick is filled — no clear action (users restart if they want to redo)
+      actionHtml = '';
     } else if (inTeamMode && !isUserPick) {
       // Only show "⚡ Sim" on the NEXT upcoming pick (can't sim out of order)
       const simBtnHtml = isNextPick
@@ -2780,7 +2860,7 @@ function renderDraftBoard() {
       </div>`;
     }
 
-    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}" data-pick="${p}" onclick="openPicker(${p})">
+    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}" data-pick="${p}" ${prospect ? '' : `onclick="openPicker(${p})"`}>
       <div class="pick-col">#${p}</div>
       <div class="team-col">${teamBadge(slot.team)}</div>
       <div class="prospect-col">
