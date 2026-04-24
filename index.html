@@ -501,36 +501,36 @@
   }
   .team-tile.selected .team-name { color: var(--accent); }
 
-  /* ── User team pick highlighting on draft board ── */
+  /* ── User team pick highlighting on draft board (GOLD) ── */
   .board-row.user-team {
-    background: rgba(234,88,12,0.06);
-    border-left: 3px solid var(--accent);
+    background: rgba(245,158,11,0.08);
+    border-left: 3px solid #f59e0b;
     padding-left: 13px;  /* 16px - 3px border */
   }
   .board-row.user-team:hover {
-    background: rgba(234,88,12,0.10);
+    background: rgba(245,158,11,0.14);
   }
   .board-row.user-team.drafted {
-    background: rgba(234,88,12,0.12);
+    background: rgba(245,158,11,0.16);
   }
-  /* Lottery results row highlighting */
+  /* Lottery results row highlighting (GOLD) */
   .lottery-user-row {
-    background: rgba(234,88,12,0.08) !important;
-    border-left: 2px solid var(--accent);
+    background: rgba(245,158,11,0.12) !important;
+    border-left: 2px solid #f59e0b;
   }
 
-  /* Current user team indicator in toolbars */
+  /* Current user team indicator in toolbars (stays orange — toolbar chip) */
   .user-team-chip {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 4px 10px;
-    background: var(--accent-light);
-    border: 1px solid var(--accent);
+    background: rgba(245,158,11,0.12);
+    border: 1px solid #f59e0b;
     border-radius: 6px;
     font-size: 0.78rem;
     font-weight: 600;
-    color: var(--accent-hover);
+    color: #b45309;
   }
   .user-team-chip img {
     width: 20px;
@@ -538,7 +538,7 @@
     object-fit: contain;
   }
 
-  /* ── Top-4 lottery highlighting + delta arrows ── */
+  /* ── Top-4 lottery highlighting (orange) + delta arrows ── */
   .lottery-top4-row {
     background: linear-gradient(to right, rgba(234,88,12,0.12), rgba(234,88,12,0.04));
     font-weight: 600;
@@ -554,10 +554,20 @@
     color: var(--accent) !important;
     font-weight: 800 !important;
   }
-  /* Combined user-team + top-4 */
+  /* User team ALWAYS wins over top-4 styling — gold overrides orange.
+     Higher specificity (.lottery-user-row.lottery-top4-row) + !important
+     ensures the gold background takes precedence. */
   .lottery-user-row.lottery-top4-row {
-    background: linear-gradient(to right, rgba(234,88,12,0.18), rgba(234,88,12,0.08));
-    border-left: 3px solid var(--accent);
+    background: linear-gradient(to right, rgba(245,158,11,0.22), rgba(245,158,11,0.10)) !important;
+    border-left: 3px solid #f59e0b;
+  }
+  .lottery-user-row.lottery-top4-row td {
+    border-top-color: rgba(245,158,11,0.4);
+    border-bottom-color: rgba(245,158,11,0.4);
+  }
+  /* In user-team top-4 rows, don't force pick number to orange — stays gold theme */
+  .lottery-user-row .pick-top4 {
+    color: #b45309 !important;
   }
 
   .delta {
@@ -594,19 +604,6 @@
     line-height: 1.2;
     white-space: nowrap;
   }
-  .your-pick-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: var(--accent);
-    padding: 4px 10px;
-    border: 1.5px dashed var(--accent);
-    border-radius: 5px;
-    background: rgba(234,88,12,0.05);
-    white-space: nowrap;
-  }
-
   /* ── Draft Recap ── */
   #draft-recap { margin-bottom: 16px; border: 2px solid var(--accent); background: linear-gradient(135deg, var(--surface), rgba(234,88,12,0.03)); }
   #draft-recap .panel-header { background: rgba(234,88,12,0.08); color: var(--accent); font-weight: 700; font-size: 1rem; padding: 12px 16px; }
@@ -625,8 +622,8 @@
   }
   .recap-row:hover { background: var(--hover); }
   .recap-row.recap-user {
-    background: rgba(234,88,12,0.06);
-    border-left: 3px solid var(--accent);
+    background: rgba(245,158,11,0.08);
+    border-left: 3px solid #f59e0b;
     padding-left: 5px;
   }
   .recap-pick-num {
@@ -2335,6 +2332,9 @@ function renderDraftBoard() {
   for (const pn of allPickNums) {
     if (!selected[pn]) { nextUnfilled = pn; break; }
   }
+  // Also determine user's next unfilled pick (if any) — "Sim to here" is only
+  // allowed on picks up to and INCLUDING this one. Past that, user must pick.
+  const userNext = STATE.userTeam ? getNextUnfilledUserPick() : null;
 
   for (const p of picks) {
     const round = p <= 30 ? 1 : 2;
@@ -2350,6 +2350,8 @@ function renderDraftBoard() {
     const isUserPick = STATE.userTeam && slot.team === STATE.userTeam;
     const inTeamMode = !!STATE.userTeam;
     const isNextPick = p === nextUnfilled;
+    // If user has an unfilled pick, don't offer sim-to-here for picks past it
+    const simToHereAllowed = userNext === null || p <= userNext;
 
     // Build right-side action UI
     let actionHtml = '';
@@ -2360,14 +2362,18 @@ function renderDraftBoard() {
       const simBtnHtml = isNextPick
         ? `<button class="btn xs" onclick="event.stopPropagation();simSinglePick(${p})" title="AI picks for this slot">⚡ Sim</button>`
         : '';
+      // "Sim to here" only if this pick is before (or equals) user's next pick
+      const simToHereHtml = simToHereAllowed
+        ? `<button class="btn xs" onclick="simUntilPick(${p})" title="AI fills all picks up to and including this one">⏩ Sim to here</button>`
+        : '';
       actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
         ${simBtnHtml}
-        <button class="btn xs" onclick="simUntilPick(${p})" title="AI fills all picks up to and including this one (stops at your picks)">⏩ Sim to here</button>
+        ${simToHereHtml}
       </div>`;
     } else if (inTeamMode && isUserPick) {
-      // User pick — button to sim every earlier pick, then user clicks to select
+      // User pick — gold row highlighting makes ownership clear, no label needed.
+      // Button still lets them sim every earlier pick first.
       actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
-        <span class="your-pick-label">YOUR PICK</span>
         <button class="btn xs" onclick="simUntilPick(${p - 1})" title="AI fills all picks before this one; you pick here">⏩ Sim until your pick</button>
       </div>`;
     }
@@ -2701,24 +2707,30 @@ function simSinglePick(pickNum) {
 }
 
 // Fill all picks from the lowest unfilled pick UP TO AND INCLUDING targetPick,
-// using the AI cascade. If a user-team pick is encountered along the way, it's
-// skipped (left empty) so the user can fill it manually.
+// using the AI cascade. If the user has an unfilled pick earlier than the
+// target, we cap at (that user pick - 1) so the user is FORCED to make their
+// pick before the sim can continue past it.
 function simUntilPick(targetPick) {
   const pickNums = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
   const taken = new Set(Object.values(STATE.selections).filter(Boolean));
-  let stoppedAtUserPick = null;
+
+  // Cap target at the pick before user's earliest unfilled pick.
+  let effectiveTarget = targetPick;
+  if (STATE.userTeam) {
+    const nextUser = getNextUnfilledUserPick();
+    if (nextUser !== null && effectiveTarget >= nextUser) {
+      effectiveTarget = nextUser - 1;
+    }
+  }
 
   for (const p of pickNums) {
-    if (p > targetPick) break;
+    if (p > effectiveTarget) break;
     if (STATE.selections[p]) continue;
     const slot = currentPickSlots[p];
     if (!slot) continue;
 
-    // Pause for user-team picks
-    if (STATE.userTeam && slot.team === STATE.userTeam) {
-      if (stoppedAtUserPick === null) stoppedAtUserPick = p;
-      continue;  // skip this pick, let user make it manually
-    }
+    // Extra safety: refuse to sim user-team picks
+    if (STATE.userTeam && slot.team === STATE.userTeam) continue;
 
     const available = new Set(allProspects.filter(n => !taken.has(n)));
     const result = computeCascadingPick(available);
@@ -2730,11 +2742,15 @@ function simUntilPick(targetPick) {
   saveState();
   renderDraftBoard();
 
-  if (stoppedAtUserPick !== null) {
-    setTimeout(() => {
-      const el = document.querySelector(`[data-pick="${stoppedAtUserPick}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+  // If we capped because of the user's next pick, scroll to it
+  if (effectiveTarget !== targetPick) {
+    const nextUser = getNextUnfilledUserPick();
+    if (nextUser !== null) {
+      setTimeout(() => {
+        const el = document.querySelector(`[data-pick="${nextUser}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    }
   }
 }
 
