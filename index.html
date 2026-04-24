@@ -647,9 +647,33 @@
   .recap-bio { font-size: 0.72rem; color: var(--muted); margin-top: 1px; }
   .recap-player { min-width: 0; }
   .recap-team { display: flex; align-items: center; }
+  .recap-lottery-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin-top: 4px;
+  }
+  .recap-lottery-table th {
+    text-align: left;
+    padding: 6px 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .recap-lottery-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .recap-lottery-table tr:last-child td { border-bottom: none; }
   @media (max-width: 700px) {
     .recap-row { grid-template-columns: 32px 46px 1fr; gap: 8px; }
     .recap-row .team-fullname { display: none; }
+    .recap-lottery-table .team-fullname { display: none; }
   }
   @media (max-width: 700px) {
     .sim-actions .btn.xs { font-size: 0.65rem; padding: 3px 6px; }
@@ -993,6 +1017,7 @@
     <div class="toolbar">
       <button id="btn-run-lottery" class="btn primary" onclick="startLottery()">Run Lottery</button>
       <button id="btn-rerun-lottery" class="btn" onclick="rerunLottery()" style="display:none">🎲 Re-run Lottery</button>
+      <button id="btn-continue-to-draft" class="btn primary" onclick="continueToDraft()" style="display:none">Continue to Draft Night →</button>
       <div class="spacer"></div>
       <span id="user-team-display-lottery"></span>
       <button class="btn team-ctl-btn" id="btn-team-ctl-lottery" onclick="handleTeamCtlClick()">🏀 Select Team</button>
@@ -1649,6 +1674,12 @@ function rerunLottery() {
   startLottery();
 }
 
+function continueToDraft() {
+  setPhase('draft');
+  // Jump to top so user sees their first action clearly
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 // ── TV BROADCAST MODE ────────────────────────────────────────────
 let _tvState = null;       // { results, currentReveal, paused }
 let _tvTimer = null;
@@ -2145,10 +2176,12 @@ function renderLottery() {
   const resEl = document.getElementById('lottery-results-table');
   const runBtn = document.getElementById('btn-run-lottery');
   const rerunBtn = document.getElementById('btn-rerun-lottery');
+  const continueBtn = document.getElementById('btn-continue-to-draft');
   if (!STATE.lotteryResults) {
     resEl.innerHTML = '<div class="empty-state"><b>No lottery run yet</b>Click "Run Lottery" to simulate the draft order.</div>';
     runBtn.style.display = '';
     rerunBtn.style.display = 'none';
+    if (continueBtn) continueBtn.style.display = 'none';
   } else {
     let rhtml = '<table><thead><tr><th>Pick</th><th>Seed</th><th>Team</th><th>Δ</th></tr></thead><tbody>';
     for (const r of STATE.lotteryResults) {
@@ -2183,6 +2216,7 @@ function renderLottery() {
     resEl.innerHTML = rhtml;
     runBtn.style.display = 'none';
     rerunBtn.style.display = '';
+    if (continueBtn) continueBtn.style.display = '';
   }
 
   // Transfers panel
@@ -2203,7 +2237,7 @@ function renderLottery() {
   }
 }
 
-// Render the end-of-draft recap panel showing the Top 14 + user's picks.
+// Render the end-of-draft recap panel showing the user's draft class + lottery results.
 // Shown above the draft board when all 60 picks are filled.
 function renderDraftRecap() {
   const panel = document.getElementById('draft-recap');
@@ -2217,25 +2251,7 @@ function renderDraftRecap() {
     return;
   }
 
-  // Top 14 picks
-  const top14 = picks.filter(p => p <= 14).sort((a, b) => a - b);
-  let topHtml = '<div class="recap-section"><div class="recap-heading">🏆 Top 14 (Lottery)</div><div class="recap-list">';
-  for (const p of top14) {
-    const slot = currentPickSlots[p];
-    const name = STATE.selections[p];
-    const bio = prospectBio(name);
-    const isUserPick = STATE.userTeam && slot.team === STATE.userTeam;
-    topHtml += `<div class="recap-row ${isUserPick ? 'recap-user' : ''}">
-      <span class="recap-pick-num">#${p}</span>
-      <span class="recap-team">${teamBadge(slot.team)}</span>
-      <div class="recap-player">
-        <div class="recap-name">${escapeHtml(name)}</div>
-        ${bio ? `<div class="recap-bio">${escapeHtml(bio)}</div>` : ''}
-      </div>
-    </div>`;
-  }
-  topHtml += '</div></div>';
-
+  // Section 1: User's draft class (if in team mode)
   let userHtml = '';
   if (STATE.userTeam) {
     const userPicks = picks.filter(p => {
@@ -2261,7 +2277,37 @@ function renderDraftRecap() {
     }
   }
 
-  body.innerHTML = topHtml + userHtml;
+  // Section 2: Draft lottery results (top 14 with deltas)
+  let lotteryHtml = '';
+  if (STATE.lotteryResults && STATE.lotteryResults.length) {
+    lotteryHtml = '<div class="recap-section"><div class="recap-heading">🎱 Draft Lottery Results</div>';
+    lotteryHtml += '<table class="recap-lottery-table"><thead><tr><th>Pick</th><th>Seed</th><th>Team</th><th>Δ</th></tr></thead><tbody>';
+    for (const r of STATE.lotteryResults) {
+      const current = currentPickSlots[r.pick];
+      const finalTeam = current ? current.team : r.team;
+      const changed = finalTeam !== r.team;
+      const isUserTeam = STATE.userTeam && (r.team === STATE.userTeam || finalTeam === STATE.userTeam);
+      const isTop4 = r.pick <= 4;
+      const delta = r.originalSlot - r.pick;
+      let deltaHtml;
+      if (delta > 0) deltaHtml = `<span class="delta delta-up">▲${delta}</span>`;
+      else if (delta < 0) deltaHtml = `<span class="delta delta-down">▼${Math.abs(delta)}</span>`;
+      else deltaHtml = `<span class="delta delta-same">—</span>`;
+      const rowCls = [
+        isUserTeam ? 'lottery-user-row' : '',
+        isTop4 ? 'lottery-top4-row' : ''
+      ].filter(Boolean).join(' ');
+      lotteryHtml += `<tr class="${rowCls}">
+        <td><span class="pick-num ${isTop4 ? 'pick-top4' : ''}">#${r.pick}</span></td>
+        <td>${r.originalSlot}</td>
+        <td>${teamBadge(r.team)}${changed ? ' <span class="transfer-arrow">→</span> ' + teamBadge(finalTeam) : ''}</td>
+        <td>${deltaHtml}</td>
+      </tr>`;
+    }
+    lotteryHtml += '</tbody></table></div>';
+  }
+
+  body.innerHTML = userHtml + lotteryHtml;
   panel.style.display = '';
 
   // Fire confetti once per draft-complete
