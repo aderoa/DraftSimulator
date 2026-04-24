@@ -1525,13 +1525,16 @@ async function loadTradeData() {
     console.warn('[DS Trade] roster load failed:', e);
   }
 
-  // 3. Real Values (rv-snapshot) — name → { tv } map
+  // 3. Real Values (rv-snapshot) — wrapped response: { today: {...}, yesterday: {...} }
+  // Player values live under `today` (or `yesterday` as fallback for early-
+  // morning/before-refresh cases). Each entry is { tv: number, ... }.
   try {
     const r = await fetch('https://hoopsmatic.com/api/rv-snapshot');
     if (r.ok) {
-      const data = await r.json();
+      const wrapper = await r.json();
+      const snapshot = wrapper.today || wrapper.yesterday || {};
       let count = 0;
-      for (const [key, val] of Object.entries(data)) {
+      for (const [key, val] of Object.entries(snapshot)) {
         if (key.startsWith('_')) continue;  // skip metadata (_date, _updated)
         if (val && typeof val === 'object' && typeof val.tv === 'number') {
           playerValues[key.toLowerCase()] = val.tv;
