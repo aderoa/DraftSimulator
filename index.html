@@ -682,6 +682,12 @@
     justify-content: center;
     flex-wrap: wrap;
   }
+  /* When rendered at the top of the recap (above the user's draft class),
+     flip the border and background for visual flow. */
+  .recap-actions-top {
+    border-top: none;
+    border-bottom: 1px solid var(--border);
+  }
 
   /* ── Finish-draft banner (shows when user's last pick is done).
      Fixed to the bottom of the viewport so it's always visible regardless
@@ -1571,76 +1577,66 @@ function fireConfetti(opts) {
 // Returns { name, confidence (0-100), votes: {name: weight, ...} } or null
 // if no source has an opinion on any available prospect.
 //
-// Adds a 5% randomness floor so high-consensus picks aren't always chalk.
-// E.g., a 100% lock has a 95% chance of being picked — the 5% "slip" goes
-// to the next-highest-voted prospect(s) in the cascade.
-function computeCascadingPick(availableSet) {
+// Uses the RM-proven approach: build a consensus-ordered list of available
+// prospects (via cascading votes), then weighted-random pick where higher-
+// ranked prospects are favored via 1/(1+i)^decay. Decay varies by pick depth
+// so #1-5 stays mostly chalk, while late-first and second round get realistic
+// variance. This naturally handles both unanimous locks and contested picks.
+function computeCascadingPick(availableSet, pickNum) {
   if (!activeSources.length || !availableSet || availableSet.size === 0) return null;
 
   const totalSourceWeight = activeSources.reduce((s, src) => s + src.weight, 0);
 
-  // Primary voting: each source votes for its top available prospect
-  const votes = {};
-  for (const src of activeSources) {
-    const list = sourceLists[src.name] || [];
-    const topPick = list.find(e => availableSet.has(e.name));
-    if (topPick) votes[topPick.name] = (votes[topPick.name] || 0) + src.weight;
-  }
-
-  // Build RUNNER-UP list too: for each source, who's their #2 available
-  // prospect. This gives us alternative slip targets even when the primary
-  // vote is unanimous (e.g., every source has Flagg #1 — but they disagree
-  // on who's #2, and that disagreement is the pool for a slip).
-  const runnerUpVotes = {};
-  for (const src of activeSources) {
-    const list = sourceLists[src.name] || [];
-    // Skip the source's top available pick; find their second-highest
-    let firstFound = false;
-    for (const e of list) {
-      if (!availableSet.has(e.name)) continue;
-      if (!firstFound) { firstFound = true; continue; }
-      runnerUpVotes[e.name] = (runnerUpVotes[e.name] || 0) + src.weight;
-      break;
+  // Build consensus-ordered list of available prospects by running the
+  // cascade: repeatedly find who each source "votes for" top among the
+  // remaining available, total the weighted votes, winner is next, remove,
+  // repeat. Produces a stable consensus ordering on THIS pool.
+  const remaining = new Set(availableSet);
+  const consensusOrdered = [];
+  const confidences = [];
+  while (remaining.size > 0 && consensusOrdered.length < 10) {  // top 10 is enough for sampling
+    const votes = {};
+    for (const src of activeSources) {
+      const list = sourceLists[src.name] || [];
+      const topPick = list.find(e => remaining.has(e.name));
+      if (topPick) votes[topPick.name] = (votes[topPick.name] || 0) + src.weight;
     }
-  }
-
-  const candidates = Object.entries(votes)
-    .map(([name, w]) => ({ name, pct: Math.round((w / totalSourceWeight) * 100) }))
-    .sort((a, b) => b.pct - a.pct);
-
-  if (!candidates.length) return null;
-
-  // 5% randomness floor. The slip pool includes: (a) primary-vote runners-up
-  // (if any), and (b) the runner-up candidates from individual source ballots.
-  // This lets a unanimous pick (100% consensus on one name) still occasionally
-  // slip to whoever scouts had as their second choice.
-  const SLIP_CHANCE = 0.05;
-  if (Math.random() < SLIP_CHANCE) {
-    // Build merged alternative pool (primary runners-up + per-source #2 picks)
-    const altPool = {};
-    for (const c of candidates.slice(1)) altPool[c.name] = c.pct;
-    for (const [name, w] of Object.entries(runnerUpVotes)) {
-      if (name === candidates[0].name) continue;  // never slip to "winner"
-      const pct = Math.round((w / totalSourceWeight) * 100);
-      altPool[name] = Math.max(altPool[name] || 0, pct);
-    }
-    const alts = Object.entries(altPool)
-      .map(([name, pct]) => ({ name, pct }))
+    const candidates = Object.entries(votes)
+      .map(([name, w]) => ({ name, pct: Math.round((w / totalSourceWeight) * 100) }))
       .sort((a, b) => b.pct - a.pct);
+    if (!candidates.length) break;
+    consensusOrdered.push(candidates[0].name);
+    confidences.push(candidates[0].pct);
+    remaining.delete(candidates[0].name);
+  }
+  if (!consensusOrdered.length) return null;
 
-    if (alts.length > 0) {
-      const altTotalWeight = alts.reduce((s, c) => s + Math.max(c.pct, 1), 0);
-      let rand = Math.random() * altTotalWeight;
-      let chosen = alts[0];
-      for (const c of alts) {
-        rand -= Math.max(c.pct, 1);
-        if (rand <= 0) { chosen = c; break; }
-      }
-      return { name: chosen.name, confidence: chosen.pct, votes, slipped: true };
+  // Weighted random over the top consensus candidates. Decay controls how
+  // concentrated the probability is on the #1 consensus vs alternatives.
+  // Higher decay = more predictable; lower = more chaos.
+  // Matches RM's autoDraftPick() approach.
+  const decay =
+    !pickNum ? 1.8 :        // default when no pick num given
+    pickNum <= 3  ? 2.8 :   // chalk-locked: #1-3 almost never move
+    pickNum <= 5  ? 2.3 :   // top-5: rare slips
+    pickNum <= 14 ? 1.8 :   // lottery: visible variance
+    pickNum <= 30 ? 1.4 :   // mid-first-round: real shuffle
+                    1.0;    // second round: wild
+
+  const weights = consensusOrdered.map((_, i) => 1 / Math.pow(1 + i, decay));
+  const totalW = weights.reduce((s, w) => s + w, 0);
+  let rand = Math.random() * totalW;
+  for (let i = 0; i < consensusOrdered.length; i++) {
+    rand -= weights[i];
+    if (rand <= 0) {
+      return {
+        name: consensusOrdered[i],
+        confidence: confidences[i] || 0,
+        slipped: i > 0,
+      };
     }
   }
-
-  return { name: candidates[0].name, confidence: candidates[0].pct, votes };
+  return { name: consensusOrdered[0], confidence: confidences[0] || 0 };
 }
 
 // Convenience: given the current STATE.selections, compute what the AI would
@@ -1648,7 +1644,7 @@ function computeCascadingPick(availableSet) {
 function computeCascadingPickForSlot(pickNum) {
   const taken = new Set(Object.values(STATE.selections || {}).filter(Boolean));
   const available = new Set(allProspects.filter(p => !taken.has(p)));
-  return computeCascadingPick(available);
+  return computeCascadingPick(available, pickNum);
 }
 
 // Convenience: simulate the entire cascade from a starting point. Useful for
@@ -1665,7 +1661,7 @@ function simulateFullCascade(startingFromPick, existingSelections) {
   for (const p of picks) {
     if (sels[p]) continue;
     const avail = new Set(allProspects.filter(n => !taken.has(n)));
-    const result = computeCascadingPick(avail);
+    const result = computeCascadingPick(avail, p);
     if (!result) break;
     out.push({ pick: p, name: result.name, confidence: result.confidence });
     taken.add(result.name);
@@ -2507,14 +2503,12 @@ function renderDraftRecap() {
     topHtml += '</div></div>';
   }
 
-  body.innerHTML = userHtml + topHtml;
-
-  // Action bar: download as image + share link
-  const actionBar = `<div class="recap-actions">
+  // Action bar at top: show image + share link (placed above the user's recap)
+  const actionBar = `<div class="recap-actions recap-actions-top">
     <button class="btn primary" onclick="downloadRecapImage()">📸 Show Image</button>
     <button class="btn" onclick="showShare()">🔗 Copy Share Link</button>
   </div>`;
-  body.innerHTML = userHtml + topHtml + actionBar;
+  body.innerHTML = actionBar + userHtml + topHtml;
 
   panel.style.display = '';
 
@@ -2606,36 +2600,54 @@ async function downloadRecapImage() {
   const actionBar = clone.querySelector('.recap-actions');
   if (actionBar) actionBar.remove();
 
-  // Critical for Chrome: all images must be reloaded with crossOrigin set
-  // BEFORE html2canvas sees them, otherwise the canvas gets tainted and
-  // .toBlob() silently produces an empty/broken image. We replace each
-  // <img> in the clone with a fresh Image() that has crossOrigin set and
-  // wait for all to load before rasterizing.
+  // CORS workaround for Chrome: the NBA CDN doesn't send CORS headers, so
+  // html2canvas (even with useCORS:true) can't rasterize the logos without
+  // tainting the canvas. Fix: route logo URLs through our Worker's /api/logo
+  // proxy (which adds CORS headers), fetch, and inline as a data: URL. Data
+  // URLs are same-origin so html2canvas reads them fine.
+  function proxyLogoUrl(url) {
+    // cdn.nba.com/logos/nba/{teamId}/global/L/logo.svg → hoopsmatic.com proxy
+    const m = url.match(/cdn\.nba\.com\/logos\/nba\/(\d+)\//);
+    if (m) return 'https://hoopsmatic.com/api/logo?teamId=' + m[1];
+    return url;  // non-NBA URLs (flags, etc.) fall through
+  }
+
+  async function imageToDataUri(url) {
+    try {
+      const fetchUrl = proxyLogoUrl(url);
+      const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+      const blob = await res.blob();
+      return await new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(new Error('FileReader failed'));
+        fr.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.warn('[DS] Failed to inline', url, e.message);
+      return null;
+    }
+  }
+
   const imgs = Array.from(clone.querySelectorAll('img'));
-  const imageLoadPromises = imgs.map(oldImg => new Promise((resolve) => {
-    const fresh = new Image();
-    fresh.crossOrigin = 'anonymous';
-    fresh.style.cssText = oldImg.style.cssText;
-    fresh.className = oldImg.className;
-    fresh.width = oldImg.width || oldImg.naturalWidth || 24;
-    fresh.height = oldImg.height || oldImg.naturalHeight || 24;
-    fresh.onload = () => {
-      oldImg.replaceWith(fresh);
-      resolve();
-    };
-    fresh.onerror = () => {
-      // If a logo fails CORS entirely, just remove the img so the layout
-      // doesn't show a broken-image icon in the output
+  const imageLoadPromises = imgs.map(async (oldImg) => {
+    const url = oldImg.src;
+    if (url.startsWith('data:')) return;
+    const dataUri = await imageToDataUri(url);
+    if (dataUri) {
+      oldImg.src = dataUri;
+      oldImg.setAttribute('width', oldImg.width || 24);
+      oldImg.setAttribute('height', oldImg.height || 24);
+    } else {
       oldImg.remove();
-      resolve();
-    };
-    fresh.src = oldImg.src;
-  }));
+    }
+  });
 
   offscreen.appendChild(clone);
   document.body.appendChild(offscreen);
 
-  // Wait for all images to reload with CORS before rasterizing
+  // Wait for all images to convert to data URIs
   await Promise.all(imageLoadPromises);
 
   try {
@@ -2854,10 +2866,16 @@ function renderDraftBoard() {
       </div>`;
     } else if (inTeamMode && isUserPick) {
       // User pick — gold row highlighting makes ownership clear, no label needed.
-      // Button still lets them sim every earlier pick first.
-      actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
-        <button class="btn xs" onclick="simUntilPick(${p - 1})" title="AI fills all picks before this one; you pick here">⏩ Sim until your pick</button>
-      </div>`;
+      // Only show "Sim until your pick" if there ARE earlier unfilled picks to
+      // sim (i.e., this is NOT the next-upcoming pick in the draft). If it's
+      // already the next pick, there's nothing to sim — user just clicks.
+      if (!isNextPick) {
+        actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
+          <button class="btn xs" onclick="simUntilPick(${p - 1})" title="AI fills all picks before this one; you pick here">⏩ Sim until your pick</button>
+        </div>`;
+      } else {
+        actionHtml = '';
+      }
     }
 
     html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}" data-pick="${p}" ${prospect ? '' : `onclick="openPicker(${p})"`}>
@@ -3180,7 +3198,7 @@ function simSinglePick(pickNum) {
 
   const taken = new Set(Object.values(STATE.selections).filter(Boolean));
   const available = new Set(allProspects.filter(p => !taken.has(p)));
-  const result = computeCascadingPick(available);
+  const result = computeCascadingPick(available, pickNum);
   if (!result) {
     alert('No AI consensus available (out of data?).');
     return;
@@ -3217,7 +3235,7 @@ function simUntilPick(targetPick) {
     if (STATE.userTeam && slot.team === STATE.userTeam) continue;
 
     const available = new Set(allProspects.filter(n => !taken.has(n)));
-    const result = computeCascadingPick(available);
+    const result = computeCascadingPick(available, p);
     if (!result) break;
     STATE.selections[p] = result.name;
     taken.add(result.name);
