@@ -1337,12 +1337,16 @@ function fireConfetti(opts) {
 
   const particles = [];
   const count = Math.round(120 * scale);
+  // Bigger bursts spread from a wider origin and shoot farther — feels like
+  // a stadium celebration instead of a single poof.
+  const originSpread = Math.max(80, 120 * Math.sqrt(scale));
+  const launchBoost = Math.sqrt(scale);
   for (let i = 0; i < count; i++) {
     particles.push({
-      x: canvas.width / 2 + (Math.random() - 0.5) * 80,
+      x: canvas.width / 2 + (Math.random() - 0.5) * originSpread,
       y: canvas.height / 2,
-      vx: (Math.random() - 0.5) * 12,
-      vy: Math.random() * -16 - 4,
+      vx: (Math.random() - 0.5) * 12 * launchBoost,
+      vy: (Math.random() * -16 - 4) * launchBoost,
       size: Math.random() * 6 + 3,
       color: colors[Math.floor(Math.random() * colors.length)],
       rotation: Math.random() * Math.PI * 2,
@@ -1613,9 +1617,10 @@ function celebrateUserLotteryMove(results) {
   if (!userResult) return;
   const delta = userResult.originalSlot - userResult.pick;
   if (delta > 0) {
-    // Bigger celebration if they won #1 or jumped into top 4
-    const scale = userResult.pick === 1 ? 2.0 : (userResult.pick <= 4 ? 1.5 : 1.0);
-    const duration = userResult.pick === 1 ? 2000 : 1200;
+    // Lottery move-ups are the most exciting moment — big burst.
+    // Bigger celebration if they jumped into top 4 or won #1.
+    const scale = userResult.pick === 1 ? 4.5 : (userResult.pick <= 4 ? 3.5 : 2.5);
+    const duration = userResult.pick === 1 ? 3200 : (userResult.pick <= 4 ? 2400 : 1800);
     fireConfetti({ scale, durationMs: duration });
   }
 }
@@ -2360,7 +2365,11 @@ function renderDraftBoard() {
         <button class="btn xs" onclick="simUntilPick(${p})" title="AI fills all picks up to and including this one (stops at your picks)">⏩ Sim to here</button>
       </div>`;
     } else if (inTeamMode && isUserPick) {
-      actionHtml = `<span class="your-pick-label">YOUR PICK</span>`;
+      // User pick — button to sim every earlier pick, then user clicks to select
+      actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
+        <span class="your-pick-label">YOUR PICK</span>
+        <button class="btn xs" onclick="simUntilPick(${p - 1})" title="AI fills all picks before this one; you pick here">⏩ Sim until your pick</button>
+      </div>`;
     }
 
     html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}" data-pick="${p}" onclick="openPicker(${p})">
