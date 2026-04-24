@@ -1835,6 +1835,14 @@ async function loadTradeData() {
   }
 
   tradeDataReady = true;
+
+  // Trade data loads asynchronously AFTER the draft board has already rendered
+  // (the board is drawn as soon as loadData() completes). Without re-rendering
+  // here, the Trade buttons never appear because they're gated by tradeDataReady.
+  // Re-render if we're currently showing the draft board.
+  if (STATE.phase === 'draft') {
+    try { renderDraftBoard(); } catch (e) { console.warn('[DS Trade] re-render failed:', e); }
+  }
 }
 
 // Utility used by trade loader — tolerant money parser
