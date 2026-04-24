@@ -195,7 +195,13 @@
     grid-template-columns: 1fr 1fr;
     gap: 16px;
   }
-  @media (max-width: 900px) { .lottery-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) {
+    .lottery-grid { grid-template-columns: 1fr; }
+    /* After lottery, results are the most relevant thing — show above standings
+       on mobile. The `.has-results` class is toggled by renderLottery(). */
+    .lottery-grid.has-results > .panel:nth-child(1) { order: 2; }
+    .lottery-grid.has-results > .panel:nth-child(2) { order: 1; }
+  }
 
   .empty-state {
     padding: 40px 20px;
@@ -998,7 +1004,12 @@
     text-align: left;
     transition: all 0.15s;
   }
-  .mode-btn:hover { border-color: var(--accent); background: var(--accent-light); }
+  /* Hover styling only on devices that genuinely support hover — prevents
+     sticky-orange state after tap on mobile (iOS/Android remember :hover
+     until the user taps elsewhere). */
+  @media (hover: hover) {
+    .mode-btn:hover { border-color: var(--accent); background: var(--accent-light); }
+  }
   .mode-btn.active { border-color: var(--accent); background: var(--accent-light); box-shadow: 0 0 0 2px rgba(234,88,12,0.1); }
   .mode-btn .mode-label { font-weight: 700; font-size: 0.9rem; color: var(--text); display: block; margin-bottom: 2px; }
   .mode-btn .mode-desc { font-size: 0.72rem; color: var(--muted); }
@@ -1244,7 +1255,7 @@
 
   <header>
     <h1 class="page-title-link" onclick="restartSimulation()" title="Click to start over">2026 NBA Draft Simulator</h1>
-    <p class="subtitle">Lottery, draft board, shareable mock drafts. <strong>Phase 1 preview</strong> · trades coming soon.</p>
+    <p class="subtitle">Lottery, draft board, shareable mock drafts.</p>
   </header>
 
   <div class="phase-nav">
@@ -2733,6 +2744,11 @@ function renderLottery() {
   html += '</tbody></table>';
   preEl.innerHTML = html;
 
+  // Toggle has-results class on the grid so mobile can reorder panels
+  // (Results above Pre-Lottery Standings once the lottery has been run)
+  const gridEl = document.getElementById('lottery-grid');
+  if (gridEl) gridEl.classList.toggle('has-results', !!STATE.lotteryResults);
+
   // Lottery results
   const resEl = document.getElementById('lottery-results-table');
   const runBtn = document.getElementById('btn-run-lottery');
@@ -2886,6 +2902,10 @@ function renderDraftRecap() {
 // Anonymously record the user's team picks to the HoopsMatic tracker so they
 // aggregate into the analytics page. We only send USER picks (not AI) to keep
 // the signal clean. Idempotent per draft via STATE._trackedOnce.
+//
+// All picks are sent in ONE batched POST to avoid race conditions in the
+// Worker's read-modify-write cycle on caches.default (multiple parallel POSTs
+// would read the same baseline and then each overwrite each other's work).
 function trackUserDraftPicks() {
   if (!STATE.userTeam) return;
   if (STATE._trackedOnce) return;
@@ -2901,22 +2921,19 @@ function trackUserDraftPicks() {
 
   if (!userPicks.length) return;
 
-  // Fire one 'draft' event per user pick (matches existing /api/tracker schema
-  // which already understands tool:'rm', action:'draft', player, team, extra).
-  // Using tool:'ds' tags them as Draft-Simulator-originated vs RM-originated.
-  for (const { pick, player } of userPicks) {
-    fetch('https://hoopsmatic.com/api/tracker', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tool: 'ds',
-        action: 'draft',
-        player,
-        team: STATE.userTeam,
-        extra: { pick },
-      }),
-    }).catch(() => {});  // fire-and-forget; analytics isn't user-facing
-  }
+  // Single batched POST with action:'draft_batch' — the Worker walks the
+  // picks array and increments counters once per request, serializing all
+  // writes atomically on its side.
+  fetch('https://hoopsmatic.com/api/tracker', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      tool: 'ds',
+      action: 'draft_batch',
+      team: STATE.userTeam,
+      picks: userPicks,  // [{pick, player}, ...]
+    }),
+  }).catch(() => {});  // fire-and-forget; analytics isn't user-facing
 }
 
 // Render the recap panel to a shareable PNG using html2canvas. Adds a brand
@@ -3621,15 +3638,26 @@ function openTradeModal(pickNum) {
     alert('Trade data is still loading — please try again in a moment.');
     return;
   }
+  if (!STATE.userTeam) {
+    // Trade feature is team-mode only; the button shouldn't render without
+    // a user team, but guard anyway.
+    return;
+  }
   const slot = currentPickSlots[pickNum];
   if (!slot) return;
 
+  // Guard: already-drafted picks cannot be traded. The board UI doesn't render
+  // the Trade button for drafted picks, but defend against direct calls too.
+  if (STATE.selections[pickNum]) {
+    alert(`Pick #${pickNum} has already been made — it can no longer be traded.`);
+    return;
+  }
+
   _tmOpenForPick = pickNum;
 
-  // Choose a sensible default partner. TM requires a non-empty second team,
-  // and a random partner gives the user something to build from. They can
-  // swap partners inside TM via the dropdown.
-  const partner = getRandomTradePartner(slot.team);
+  const userTeam = STATE.userTeam;
+  const pickOwner = slot.team;
+  const isOwnPick = (pickOwner === userTeam);
 
   // Decide 2025-26 vs 2026-27 salary mode. After June 30 the offseason has
   // begun and 2026-27 salaries are in force — matches TM's default.
@@ -3637,10 +3665,21 @@ function openTradeModal(pickNum) {
   const afterJun30 = (now.getMonth() > 5) || (now.getMonth() === 5 && now.getDate() > 30);
   const offseasonParam = afterJun30 ? '&offseason=1' : '';
 
-  const url = `${TM_URL_BASE}/?rm=${encodeURIComponent(slot.team)}`
-    + `&t=${encodeURIComponent(slot.team)},${encodeURIComponent(partner)}`
-    + offseasonParam
-    + `&draftpick=${pickNum}`;
+  // URL construction differs by case:
+  //  - Own pick: Team B empty so user picks the partner; pick auto-select
+  //    isn't possible for Team A via URL params, so user manually selects it.
+  //  - Other team's pick: Team B = owner, pick auto-selected on Team B.
+  let url;
+  if (isOwnPick) {
+    url = `${TM_URL_BASE}/?rm=${encodeURIComponent(userTeam)}`
+      + `&t=${encodeURIComponent(userTeam)}`
+      + offseasonParam;
+  } else {
+    url = `${TM_URL_BASE}/?rm=${encodeURIComponent(userTeam)}`
+      + `&t=${encodeURIComponent(userTeam)},${encodeURIComponent(pickOwner)}`
+      + offseasonParam
+      + `&draftpick=${pickNum}`;
+  }
 
   const iframe = document.getElementById('tm-iframe');
   const loading = document.getElementById('tm-frame-loading');
@@ -3668,12 +3707,6 @@ function closeTradeModal() {
     iframe.style.display = 'none';
   }
   _tmOpenForPick = null;
-}
-
-// Pick any other team at random — used to give TM a default second team.
-function getRandomTradePartner(excludeAbbrev) {
-  const pool = ALL_NBA_TEAMS.filter(t => t !== excludeAbbrev);
-  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 // Build the ROSTER_MANAGER_PICKS payload from DS's current state.
