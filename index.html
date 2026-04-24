@@ -795,8 +795,99 @@
   }
   .recap-name { font-weight: 600; font-size: 0.9rem; color: var(--text); }
   .recap-bio { font-size: 0.72rem; color: var(--muted); margin-top: 1px; }
+  .recap-acquired {
+    font-size: 0.7rem;
+    color: var(--accent);
+    margin-top: 2px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+  }
   .recap-player { min-width: 0; }
   .recap-team { display: flex; align-items: center; gap: 6px; }
+
+  /* ── Trade cards in recap ── */
+  .recap-trades-list { display: flex; flex-direction: column; gap: 8px; }
+  .recap-trade {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .recap-trade-hdr {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+  .recap-trade-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    background: var(--surface);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .recap-trade-teams {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .recap-trade-body {
+    display: grid;
+    grid-template-columns: 1fr 24px 1fr;
+    gap: 10px;
+    padding: 10px 12px;
+    align-items: start;
+  }
+  .recap-trade-side { min-width: 0; }
+  .recap-trade-side-label {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .recap-trade-arrow {
+    text-align: center;
+    color: var(--muted);
+    font-size: 1.1rem;
+    padding-top: 14px;
+  }
+  .recap-trade-assets {
+    margin: 0;
+    padding-left: 18px;
+    list-style: disc;
+  }
+  .recap-trade-assets li {
+    font-size: 0.82rem;
+    color: var(--text);
+    margin: 2px 0;
+    line-height: 1.3;
+  }
+  .recap-trade-asset-note {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .recap-trade-empty {
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-style: italic;
+    padding-left: 18px;
+  }
+  @media (max-width: 700px) {
+    .recap-trade-body { grid-template-columns: 1fr; }
+    .recap-trade-arrow { padding: 0; transform: rotate(90deg); }
+  }
   .recap-actions {
     display: flex;
     gap: 10px;
@@ -2814,6 +2905,107 @@ function renderLottery() {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────
+//  TRADE RECAP HELPERS (Phase 2c)
+// ───────────────────────────────────────────────────────────────────
+
+// Build a map of { pickNum -> originalOwnerAbbrev } for 2026 picks the user
+// acquired via trade. Used to annotate "Acquired from X" on draft class rows.
+//
+// Walks STATE.trades in order. For each trade, any 2026 pick the user
+// received is recorded with the partner team (the one who sent it).
+// Subsequent trades of the same pick aren't an issue because once a user
+// drafts the player, the pick is no longer tradeable.
+function buildAcquiredPickMap() {
+  const map = {};
+  if (!Array.isArray(STATE.trades)) return map;
+  if (!STATE.userTeam) return map;
+  const pickNumFromNotes = (notes) => {
+    if (!notes) return null;
+    const m = /#(\d+)\b/.exec(String(notes));
+    return m ? parseInt(m[1]) : null;
+  };
+  for (const t of STATE.trades) {
+    if (!t || t.dsTeam !== STATE.userTeam) continue;
+    for (const p of (t.picksIn || [])) {
+      if (p.year !== '2026') continue;
+      const pn = pickNumFromNotes(p.notes);
+      if (!pn) continue;
+      // p.fromTeam is the sender (the partner team)
+      if (p.fromTeam) map[pn] = p.fromTeam;
+    }
+  }
+  return map;
+}
+
+// Render the "Trades" section of the recap. One card per trade.
+function renderTradesSection() {
+  if (!Array.isArray(STATE.trades) || !STATE.trades.length) return '';
+  const userTeam = STATE.userTeam;
+  if (!userTeam) return '';
+
+  let html = `<div class="recap-section"><div class="recap-heading">🔄 Trades (${STATE.trades.length})</div><div class="recap-trades-list">`;
+
+  STATE.trades.forEach((t, idx) => {
+    // Determine the partner team (the counterparty)
+    const partnerTeam =
+      (t.picksIn && t.picksIn[0] && t.picksIn[0].fromTeam) ||
+      (t.in && t.in[0] && t.in[0].fromTeam) ||
+      null;
+
+    const partnerName = partnerTeam ? (TEAM_FULL_NAME[partnerTeam] || partnerTeam) : 'Trade Partner';
+    const userName = TEAM_FULL_NAME[userTeam] || userTeam;
+
+    html += `<div class="recap-trade">
+      <div class="recap-trade-hdr">
+        <span class="recap-trade-num">#${idx + 1}</span>
+        <span class="recap-trade-teams">${teamLogoOnly(userTeam, 18)} ${escapeHtml(userName)} ↔ ${partnerTeam ? teamLogoOnly(partnerTeam, 18) : ''} ${escapeHtml(partnerName)}</span>
+      </div>
+      <div class="recap-trade-body">
+        <div class="recap-trade-side">
+          <div class="recap-trade-side-label">${escapeHtml(userName)} sent</div>
+          ${renderTradeAssetList(t.out, t.picksOut)}
+        </div>
+        <div class="recap-trade-arrow">→</div>
+        <div class="recap-trade-side">
+          <div class="recap-trade-side-label">${escapeHtml(userName)} received</div>
+          ${renderTradeAssetList(t.in, t.picksIn)}
+        </div>
+      </div>
+    </div>`;
+  });
+
+  html += '</div></div>';
+  return html;
+}
+
+// Render one side of a trade as a list of bullets (players + picks).
+function renderTradeAssetList(playersArr, picksArr) {
+  const items = [];
+  for (const p of (playersArr || [])) {
+    if (!p || !p.name) continue;
+    items.push(escapeHtml(p.name));
+  }
+  for (const pk of (picksArr || [])) {
+    if (!pk) continue;
+    // Notes may already include "#N pick · ..." for 2026, or natural language
+    // like "MIL 2027 1st (top-4 protected)" for future picks.
+    let label;
+    const m = /#(\d+)\b/.exec(String(pk.notes || ''));
+    if (pk.year === '2026' && m) {
+      label = `2026 #${m[1]} pick`;
+    } else {
+      label = `${pk.year || ''} ${pk.round || ''} round`.trim();
+      if (pk.notes && !/^#\d+/.test(pk.notes) && pk.notes !== 'Own pick') {
+        label += ` <span class="recap-trade-asset-note">(${escapeHtml(pk.notes.slice(0, 60))})</span>`;
+      }
+    }
+    items.push(label);
+  }
+  if (!items.length) return '<div class="recap-trade-empty">—</div>';
+  return '<ul class="recap-trade-assets">' + items.map(x => `<li>${x}</li>`).join('') + '</ul>';
+}
+
 // Render the end-of-draft recap panel showing the user's draft class + the Top 14 picks.
 // Shown above the draft board when all 60 picks are filled.
 function renderDraftRecap() {
@@ -2836,11 +3028,19 @@ function renderDraftRecap() {
       return slot && slot.team === STATE.userTeam;
     });
     if (userPicks.length) {
+      // Build an index of which 2026 picks were acquired via trade so we can
+      // annotate inline on the recap rows. Format: { pickNum: fromTeamAbbrev }
+      const acquiredFrom = buildAcquiredPickMap();
+
       const teamName = TEAM_FULL_NAME[STATE.userTeam] || STATE.userTeam;
       userHtml = `<div class="recap-section"><div class="recap-heading">${teamLogoOnly(STATE.userTeam, 20)} ${escapeHtml(teamName)} — Your Draft Class</div><div class="recap-list">`;
       for (const p of userPicks) {
         const name = STATE.selections[p];
         const bio = prospectBio(name);
+        const fromTeam = acquiredFrom[p];
+        const acquiredHtml = fromTeam
+          ? `<div class="recap-acquired">↔ Acquired from ${escapeHtml(TEAM_FULL_NAME[fromTeam] || fromTeam)}</div>`
+          : '';
         userHtml += `<div class="recap-row recap-user">
           <span class="recap-pick-num">#${p}</span>
           <span class="recap-round-label">${p <= 30 ? 'R1' : 'R2'}</span>
@@ -2848,11 +3048,18 @@ function renderDraftRecap() {
           <div class="recap-player">
             <div class="recap-name">${escapeHtml(name)}</div>
             ${bio ? `<div class="recap-bio">${escapeHtml(bio)}</div>` : ''}
+            ${acquiredHtml}
           </div>
         </div>`;
       }
       userHtml += '</div></div>';
     }
+  }
+
+  // Section 1b: Trades (between draft class and Top 14 — only if any happened)
+  let tradesHtml = '';
+  if (STATE.userTeam && Array.isArray(STATE.trades) && STATE.trades.length) {
+    tradesHtml = renderTradesSection();
   }
 
   // Section 2: Top 14 picks (with drafted player at each position)
@@ -2884,7 +3091,7 @@ function renderDraftRecap() {
     <button class="btn" onclick="showShare()">🔗 Copy Share Link</button>
     <button class="btn" onclick="restartSimulation()">🔄 Start Over</button>
   </div>`;
-  body.innerHTML = actionBar + userHtml + topHtml;
+  body.innerHTML = actionBar + userHtml + tradesHtml + topHtml;
 
   panel.style.display = '';
 
