@@ -670,6 +670,15 @@
     vertical-align: middle;
   }
   .recap-lottery-table tr:last-child td { border-bottom: none; }
+  .recap-actions {
+    display: flex;
+    gap: 10px;
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
   @media (max-width: 700px) {
     .recap-row { grid-template-columns: 32px 46px 1fr; gap: 8px; }
     .recap-row .team-fullname { display: none; }
@@ -951,6 +960,7 @@
     th, td { padding: 6px 8px; font-size: 0.78rem; }
   }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 
@@ -2308,12 +2318,132 @@ function renderDraftRecap() {
   }
 
   body.innerHTML = userHtml + lotteryHtml;
+
+  // Action bar: download as image + share link
+  const actionBar = `<div class="recap-actions">
+    <button class="btn primary" onclick="downloadRecapImage()">📸 Download as Image</button>
+    <button class="btn" onclick="showShare()">🔗 Copy Share Link</button>
+  </div>`;
+  body.innerHTML = userHtml + lotteryHtml + actionBar;
+
   panel.style.display = '';
 
-  // Fire confetti once per draft-complete
+  // Fire confetti once per draft-complete + record analytics (user picks only)
   if (!STATE._recapShownOnce) {
     STATE._recapShownOnce = true;
     fireConfetti({ scale: 1.8, durationMs: 1400 });
+    trackUserDraftPicks();
+  }
+}
+
+// Anonymously record the user's team picks to the HoopsMatic tracker so they
+// aggregate into the analytics page. We only send USER picks (not AI) to keep
+// the signal clean. Idempotent per draft via STATE._trackedOnce.
+function trackUserDraftPicks() {
+  if (!STATE.userTeam) return;
+  if (STATE._trackedOnce) return;
+  STATE._trackedOnce = true;
+
+  const picks = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
+  const userPicks = picks
+    .filter(p => {
+      const slot = currentPickSlots[p];
+      return slot && slot.team === STATE.userTeam && STATE.selections[p];
+    })
+    .map(p => ({ pick: p, player: STATE.selections[p] }));
+
+  if (!userPicks.length) return;
+
+  // Fire one 'draft' event per user pick (matches existing /api/tracker schema
+  // which already understands tool:'rm', action:'draft', player, team, extra).
+  // Using tool:'ds' tags them as Draft-Simulator-originated vs RM-originated.
+  for (const { pick, player } of userPicks) {
+    fetch('/api/tracker', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tool: 'ds',
+        action: 'draft',
+        player,
+        team: STATE.userTeam,
+        extra: { pick },
+      }),
+    }).catch(() => {});  // fire-and-forget; analytics isn't user-facing
+  }
+}
+
+// Render the recap panel to a shareable PNG using html2canvas. Adds a brand
+// header so the image is self-explanatory when shared outside HoopsMatic.
+async function downloadRecapImage() {
+  if (typeof html2canvas === 'undefined') {
+    alert('Image library failed to load. Please refresh and try again.');
+    return;
+  }
+  const panel = document.getElementById('draft-recap');
+  if (!panel) return;
+
+  // Build an off-screen rendering container with a brand header so the output
+  // image has context when shared outside the app.
+  const offscreen = document.createElement('div');
+  offscreen.style.cssText = `
+    position: fixed; left: -99999px; top: 0;
+    width: 780px; padding: 24px; background: #fff;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  `;
+
+  const header = document.createElement('div');
+  header.style.cssText = `
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0 18px; margin-bottom: 16px;
+    border-bottom: 2px solid #1a1a2e;
+  `;
+  const titleGroup = `
+    <div>
+      <div style="font-size: 1.5rem; font-weight: 800; color: #1a1a2e; letter-spacing: -0.01em;">2026 NBA Draft Simulator</div>
+      <div style="font-size: 0.82rem; color: #6b7280; margin-top: 2px;">Your mock draft recap</div>
+    </div>
+    <div style="font-size: 0.72rem; color: #9ca3af; font-family: 'JetBrains Mono', monospace;">hoopsmatic.com/draft-simulator</div>
+  `;
+  header.innerHTML = titleGroup;
+  offscreen.appendChild(header);
+
+  // Clone the recap panel so we don't break layout of the live DOM
+  const clone = panel.cloneNode(true);
+  // Remove the action bar from the clone (buttons shouldn't be in the image)
+  const actionBar = clone.querySelector('.recap-actions');
+  if (actionBar) actionBar.remove();
+  offscreen.appendChild(clone);
+  document.body.appendChild(offscreen);
+
+  // Small delay to ensure images load before rasterizing
+  await new Promise(r => setTimeout(r, 100));
+
+  try {
+    const canvas = await html2canvas(offscreen, {
+      backgroundColor: '#ffffff',
+      scale: 2,                // 2x for retina
+      useCORS: true,           // needed for NBA CDN logos
+      allowTaint: false,
+      logging: false,
+    });
+
+    // Trigger download
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `2026-draft-${STATE.userTeam || 'full-sim'}-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  } catch (e) {
+    console.error('[DS] Failed to generate image:', e);
+    alert('Could not generate image. Please try again.');
+  } finally {
+    document.body.removeChild(offscreen);
   }
 }
 
@@ -2601,6 +2731,7 @@ function handleTeamCtlClick() {
     STATE.pickTransfers = [];
     STATE.selections = {};
     STATE._recapShownOnce = false;
+    STATE._trackedOnce = false;
     currentPickSlots = JSON.parse(JSON.stringify(originalPickSlots));
     _tvState = null;
     _drawRoomState = null;
@@ -2722,6 +2853,7 @@ function clearAllPicks() {
   if (!confirm('Clear all draft selections? Lottery results will be kept.')) return;
   STATE.selections = {};
   STATE._recapShownOnce = false;
+  STATE._trackedOnce = false;
   saveState();
   renderDraftBoard();
 }
