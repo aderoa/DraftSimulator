@@ -604,34 +604,59 @@
     line-height: 1.2;
     white-space: nowrap;
   }
-  /* ── Draft Recap ── */
-  #draft-recap { margin-bottom: 16px; border: 2px solid var(--accent); background: linear-gradient(135deg, var(--surface), rgba(234,88,12,0.03)); }
-  #draft-recap .panel-header { background: rgba(234,88,12,0.08); color: var(--accent); font-weight: 700; font-size: 1rem; padding: 12px 16px; }
-  .recap-section { padding: 12px 16px; }
+  /* ── Draft Recap (clean neutral look with orange reserved for accents) ── */
+  #draft-recap {
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  #draft-recap .panel-header {
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .recap-section { padding: 14px 16px; }
   .recap-section + .recap-section { border-top: 1px solid var(--border); }
-  .recap-heading { font-size: 0.85rem; font-weight: 700; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-  .recap-list { display: flex; flex-direction: column; gap: 4px; }
+  .recap-heading {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .recap-list { display: flex; flex-direction: column; gap: 3px; }
   .recap-row {
     display: grid;
-    grid-template-columns: 40px 200px 1fr;
+    grid-template-columns: 40px 44px 200px 1fr;
     gap: 10px;
     align-items: center;
-    padding: 6px 8px;
+    padding: 8px 10px;
     border-radius: 6px;
     transition: background 0.1s;
+    background: transparent;
   }
   .recap-row:hover { background: var(--hover); }
   .recap-row.recap-user {
     background: rgba(245,158,11,0.08);
     border-left: 3px solid #f59e0b;
-    padding-left: 5px;
+    padding-left: 7px;
   }
   .recap-pick-num {
     font-family: 'JetBrains Mono', monospace;
     font-weight: 700;
-    color: var(--accent);
+    color: var(--muted);
     font-size: 0.85rem;
   }
+  .recap-row.recap-user .recap-pick-num { color: #b45309; }
   .recap-round-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem;
@@ -641,48 +666,56 @@
     background: var(--bg);
     border-radius: 4px;
     text-align: center;
-    width: 36px;
+    min-width: 28px;
   }
   .recap-name { font-weight: 600; font-size: 0.9rem; color: var(--text); }
   .recap-bio { font-size: 0.72rem; color: var(--muted); margin-top: 1px; }
   .recap-player { min-width: 0; }
-  .recap-team { display: flex; align-items: center; }
-  .recap-lottery-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-    margin-top: 4px;
-  }
-  .recap-lottery-table th {
-    text-align: left;
-    padding: 6px 10px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    border-bottom: 1px solid var(--border);
-    font-family: 'JetBrains Mono', monospace;
-  }
-  .recap-lottery-table td {
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
-  }
-  .recap-lottery-table tr:last-child td { border-bottom: none; }
+  .recap-team { display: flex; align-items: center; gap: 6px; }
   .recap-actions {
     display: flex;
     gap: 10px;
     padding: 14px 16px;
     border-top: 1px solid var(--border);
-    margin-top: 4px;
+    background: var(--bg);
     justify-content: center;
     flex-wrap: wrap;
   }
+
+  /* ── Finish-draft banner (shows when user's last pick is done) ── */
+  #finish-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+    background: linear-gradient(135deg, rgba(245,158,11,0.10), rgba(245,158,11,0.04));
+    border: 1px solid #f59e0b;
+    border-radius: 10px;
+    flex-wrap: wrap;
+  }
+  .finish-banner-text {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+  }
+  .finish-banner-icon { font-size: 1.3rem; }
+  .finish-banner-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text);
+  }
+  .finish-banner-sub {
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-top: 2px;
+  }
   @media (max-width: 700px) {
-    .recap-row { grid-template-columns: 32px 46px 1fr; gap: 8px; }
+    .recap-row { grid-template-columns: 32px 36px 46px 1fr; gap: 6px; padding: 8px 6px; }
     .recap-row .team-fullname { display: none; }
-    .recap-lottery-table .team-fullname { display: none; }
   }
   @media (max-width: 700px) {
     .sim-actions .btn.xs { font-size: 0.65rem; padding: 3px 6px; }
@@ -1064,6 +1097,18 @@
     <div id="draft-recap" class="panel" style="display:none">
       <div class="panel-header">🏆 Draft Recap</div>
       <div id="draft-recap-body" class="panel-body"></div>
+    </div>
+
+    <!-- Shown when user's last pick is done but draft isn't complete -->
+    <div id="finish-banner" style="display:none">
+      <div class="finish-banner-text">
+        <span class="finish-banner-icon">✅</span>
+        <div>
+          <div class="finish-banner-title">You've made all your picks</div>
+          <div class="finish-banner-sub">Simulate the rest of the draft to see the full results.</div>
+        </div>
+      </div>
+      <button class="btn primary" onclick="simToNextUserPick()">⚡ Sim until end of draft</button>
     </div>
 
     <div class="toolbar">
@@ -2247,7 +2292,7 @@ function renderLottery() {
   }
 }
 
-// Render the end-of-draft recap panel showing the user's draft class + lottery results.
+// Render the end-of-draft recap panel showing the user's draft class + the Top 14 picks.
 // Shown above the draft board when all 60 picks are filled.
 function renderDraftRecap() {
   const panel = document.getElementById('draft-recap');
@@ -2270,13 +2315,14 @@ function renderDraftRecap() {
     });
     if (userPicks.length) {
       const teamName = TEAM_FULL_NAME[STATE.userTeam] || STATE.userTeam;
-      userHtml = `<div class="recap-section"><div class="recap-heading">${teamLogoOnly(STATE.userTeam, 22)} ${escapeHtml(teamName)} — Your Draft Class</div><div class="recap-list">`;
+      userHtml = `<div class="recap-section"><div class="recap-heading">${teamLogoOnly(STATE.userTeam, 20)} ${escapeHtml(teamName)} — Your Draft Class</div><div class="recap-list">`;
       for (const p of userPicks) {
         const name = STATE.selections[p];
         const bio = prospectBio(name);
         userHtml += `<div class="recap-row recap-user">
           <span class="recap-pick-num">#${p}</span>
           <span class="recap-round-label">${p <= 30 ? 'R1' : 'R2'}</span>
+          <span class="recap-team">${teamLogoOnly(STATE.userTeam, 24)}</span>
           <div class="recap-player">
             <div class="recap-name">${escapeHtml(name)}</div>
             ${bio ? `<div class="recap-bio">${escapeHtml(bio)}</div>` : ''}
@@ -2287,44 +2333,37 @@ function renderDraftRecap() {
     }
   }
 
-  // Section 2: Draft lottery results (top 14 with deltas)
-  let lotteryHtml = '';
-  if (STATE.lotteryResults && STATE.lotteryResults.length) {
-    lotteryHtml = '<div class="recap-section"><div class="recap-heading">🎱 Draft Lottery Results</div>';
-    lotteryHtml += '<table class="recap-lottery-table"><thead><tr><th>Pick</th><th>Seed</th><th>Team</th><th>Δ</th></tr></thead><tbody>';
-    for (const r of STATE.lotteryResults) {
-      const current = currentPickSlots[r.pick];
-      const finalTeam = current ? current.team : r.team;
-      const changed = finalTeam !== r.team;
-      const isUserTeam = STATE.userTeam && (r.team === STATE.userTeam || finalTeam === STATE.userTeam);
-      const isTop4 = r.pick <= 4;
-      const delta = r.originalSlot - r.pick;
-      let deltaHtml;
-      if (delta > 0) deltaHtml = `<span class="delta delta-up">▲${delta}</span>`;
-      else if (delta < 0) deltaHtml = `<span class="delta delta-down">▼${Math.abs(delta)}</span>`;
-      else deltaHtml = `<span class="delta delta-same">—</span>`;
-      const rowCls = [
-        isUserTeam ? 'lottery-user-row' : '',
-        isTop4 ? 'lottery-top4-row' : ''
-      ].filter(Boolean).join(' ');
-      lotteryHtml += `<tr class="${rowCls}">
-        <td><span class="pick-num ${isTop4 ? 'pick-top4' : ''}">#${r.pick}</span></td>
-        <td>${r.originalSlot}</td>
-        <td>${teamBadge(r.team)}${changed ? ' <span class="transfer-arrow">→</span> ' + teamBadge(finalTeam) : ''}</td>
-        <td>${deltaHtml}</td>
-      </tr>`;
+  // Section 2: Top 14 picks (with drafted player at each position)
+  const top14 = picks.filter(p => p <= 14).sort((a, b) => a - b);
+  let topHtml = '';
+  if (top14.length) {
+    topHtml = '<div class="recap-section"><div class="recap-heading">🏆 Top 14 Picks</div><div class="recap-list">';
+    for (const p of top14) {
+      const slot = currentPickSlots[p];
+      const name = STATE.selections[p];
+      const bio = prospectBio(name);
+      const isUserPick = STATE.userTeam && slot.team === STATE.userTeam;
+      topHtml += `<div class="recap-row ${isUserPick ? 'recap-user' : ''}">
+        <span class="recap-pick-num">#${p}</span>
+        <span class="recap-round-label">R1</span>
+        <span class="recap-team">${teamLogoOnly(slot.team, 24)}<span class="team-fullname" style="font-size:0.78rem;color:var(--muted)">${escapeHtml(TEAM_FULL_NAME[slot.team] || slot.team)}</span></span>
+        <div class="recap-player">
+          <div class="recap-name">${escapeHtml(name)}</div>
+          ${bio ? `<div class="recap-bio">${escapeHtml(bio)}</div>` : ''}
+        </div>
+      </div>`;
     }
-    lotteryHtml += '</tbody></table></div>';
+    topHtml += '</div></div>';
   }
 
-  body.innerHTML = userHtml + lotteryHtml;
+  body.innerHTML = userHtml + topHtml;
 
   // Action bar: download as image + share link
   const actionBar = `<div class="recap-actions">
     <button class="btn primary" onclick="downloadRecapImage()">📸 Download as Image</button>
     <button class="btn" onclick="showShare()">🔗 Copy Share Link</button>
   </div>`;
-  body.innerHTML = userHtml + lotteryHtml + actionBar;
+  body.innerHTML = userHtml + topHtml + actionBar;
 
   panel.style.display = '';
 
@@ -2461,13 +2500,11 @@ function renderDraftBoard() {
     if (!STATE.userTeam) {
       simToNextBtn.style.display = 'none';
     } else {
-      // Label based on whether user has any more picks ahead
       const next = getNextUnfilledUserPick();
       if (next !== null) {
         simToNextBtn.style.display = '';
         simToNextBtn.textContent = `⚡ Sim until your next pick (#${next})`;
       } else {
-        // No more user picks — offer "Sim until end" instead
         const anyEmpty = Object.keys(currentPickSlots).some(p => !STATE.selections[p]);
         if (anyEmpty) {
           simToNextBtn.style.display = '';
@@ -2477,6 +2514,16 @@ function renderDraftBoard() {
         }
       }
     }
+  }
+
+  // Finish banner: show when user has made all picks but draft isn't complete
+  const finishBanner = document.getElementById('finish-banner');
+  if (finishBanner) {
+    const inTeamMode = !!STATE.userTeam;
+    const userDone = inTeamMode && getNextUnfilledUserPick() === null;
+    const anyEmpty = Object.keys(currentPickSlots).some(p => !STATE.selections[p]);
+    const showBanner = inTeamMode && userDone && anyEmpty;
+    finishBanner.style.display = showBanner ? 'flex' : 'none';
   }
 
   const picks = Object.keys(currentPickSlots).map(n => parseInt(n)).sort((a,b) => a-b);
