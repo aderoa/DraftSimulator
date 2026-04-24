@@ -346,6 +346,224 @@
   .picker-item .bio { color: var(--dim); font-size: 0.7rem; }
   .picker-item .taken-badge { font-size: 0.65rem; color: var(--muted); background: var(--bg); padding: 2px 6px; border-radius: 3px; }
 
+  /* ── Trade Modal (Phase 2c) ── */
+  .trade-box {
+    background: var(--surface);
+    border-radius: 12px;
+    width: 920px;
+    max-width: 96vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  }
+  .trade-partners {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .trade-partner {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .trade-partner-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .trade-partner-team {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 8px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .trade-partner-team img { width: 24px; height: 24px; object-fit: contain; }
+  .trade-partner-select {
+    padding: 8px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.92rem;
+    font-weight: 600;
+    background: var(--surface);
+    cursor: pointer;
+  }
+  .trade-partner-select:focus { border-color: var(--accent); outline: none; }
+  .trade-arrow {
+    font-size: 1.3rem;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  .trade-panels {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    overflow: hidden;
+    min-height: 280px;
+  }
+  .trade-panel {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .trade-panel:last-child { border-right: none; }
+  .trade-panel-header {
+    padding: 10px 14px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .trade-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+  }
+  .trade-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .trade-asset-section { margin-bottom: 8px; }
+  .trade-asset-section-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    padding: 6px 10px 4px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .trade-asset {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .trade-asset:hover { background: var(--hover); }
+  .trade-asset.selected {
+    background: rgba(245,158,11,0.12);
+    border-left: 3px solid #f59e0b;
+    padding-left: 7px;
+  }
+  .trade-asset input[type="checkbox"] {
+    cursor: pointer;
+    width: 14px; height: 14px;
+    accent-color: #f59e0b;
+  }
+  .trade-asset-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .trade-asset-meta {
+    font-size: 0.68rem;
+    color: var(--muted);
+    margin-top: 1px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .trade-asset-value {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+  }
+  .trade-asset.selected .trade-asset-value { color: var(--accent); }
+
+  .trade-summary {
+    padding: 14px 18px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .trade-summary-metrics {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .trade-summary-value {
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+  .trade-summary-value .label {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .trade-summary-value span:not(.label) {
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text);
+  }
+  .trade-summary-delta {
+    font-size: 1rem;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 4px 10px;
+    border-radius: 5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .trade-summary-delta.positive { color: #16a34a; background: rgba(22,163,74,0.08); border-color: rgba(22,163,74,0.3); }
+  .trade-summary-delta.negative { color: #dc2626; background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.3); }
+  .trade-summary-warnings {
+    font-size: 0.78rem;
+    color: var(--red);
+  }
+  .trade-summary-warnings:empty { display: none; }
+  .trade-summary-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+  .btn.btn-trade {
+    background: rgba(168,85,247,0.12);
+    border-color: rgba(168,85,247,0.35);
+    color: #7c3aed;
+  }
+  .btn.btn-trade:hover {
+    background: rgba(168,85,247,0.18);
+    border-color: rgba(168,85,247,0.55);
+  }
+  @media (max-width: 720px) {
+    .trade-box { width: 100%; max-height: 100vh; border-radius: 0; }
+    .trade-panels { grid-template-columns: 1fr; min-height: auto; }
+    .trade-panel { border-right: none; border-bottom: 1px solid var(--border); }
+    .trade-panel:last-child { border-bottom: none; }
+    .trade-partners { flex-direction: column; align-items: stretch; gap: 8px; }
+    .trade-arrow { display: none; }
+  }
+
   /* ── Share dialog ── */
   .share-box {
     background: var(--accent-light);
@@ -1316,6 +1534,56 @@
       <input type="text" id="picker-search" placeholder="Search prospects..." oninput="renderPicker(this.value)" autofocus>
     </div>
     <div class="picker-list" id="picker-list"></div>
+  </div>
+</div>
+
+
+<!-- ─── Trade Modal (Phase 2c) ─── -->
+<div id="trade-modal" class="picker-overlay" style="display:none" onclick="if(event.target===this)closeTradeModal()">
+  <div class="trade-box">
+    <div class="picker-hdr">
+      <h3>Propose Trade</h3>
+      <button class="x" onclick="closeTradeModal()">×</button>
+    </div>
+    <div class="trade-partners">
+      <div class="trade-partner">
+        <div class="trade-partner-label">Initiator</div>
+        <div class="trade-partner-team" id="trade-team-a"></div>
+      </div>
+      <div class="trade-arrow">↔</div>
+      <div class="trade-partner">
+        <div class="trade-partner-label">Partner</div>
+        <select id="trade-team-b-select" class="trade-partner-select" onchange="onTradePartnerChanged(this.value)">
+          <option value="">Select a team…</option>
+        </select>
+      </div>
+    </div>
+    <div class="trade-panels">
+      <div class="trade-panel">
+        <div class="trade-panel-header" id="trade-panel-a-header">— sends —</div>
+        <div class="trade-panel-body" id="trade-panel-a-body">
+          <div class="trade-empty-state">Select a trade partner to start.</div>
+        </div>
+      </div>
+      <div class="trade-panel">
+        <div class="trade-panel-header" id="trade-panel-b-header">— sends —</div>
+        <div class="trade-panel-body" id="trade-panel-b-body">
+          <div class="trade-empty-state">Select a trade partner to start.</div>
+        </div>
+      </div>
+    </div>
+    <div class="trade-summary" id="trade-summary">
+      <div class="trade-summary-metrics">
+        <div class="trade-summary-value"><span class="label">Value sent:</span> <span id="trade-val-a">$0</span></div>
+        <div class="trade-summary-value"><span class="label">Value received:</span> <span id="trade-val-b">$0</span></div>
+        <div class="trade-summary-delta" id="trade-val-delta">Δ $0</div>
+      </div>
+      <div class="trade-summary-warnings" id="trade-warnings"></div>
+      <div class="trade-summary-actions">
+        <button class="btn" onclick="closeTradeModal()">Cancel</button>
+        <button class="btn primary" id="trade-confirm-btn" onclick="confirmTrade()" disabled>Propose Trade</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -3108,6 +3376,12 @@ function renderDraftBoard() {
 
     // Build right-side action UI
     let actionHtml = '';
+    // Trade button: shown on ALL empty 2026 picks in team mode.
+    // Only rendered when trade data is loaded (feature is ready).
+    const tradeBtnHtml = (inTeamMode && !prospect && tradeDataReady)
+      ? `<button class="btn xs btn-trade" onclick="event.stopPropagation();openTradeModal(${p})" title="Propose a trade involving this pick">🔄 Trade</button>`
+      : '';
+
     if (prospect) {
       // Pick is filled — no clear action (users restart if they want to redo)
       actionHtml = '';
@@ -3121,6 +3395,7 @@ function renderDraftBoard() {
         ? `<button class="btn xs" onclick="simUntilPick(${p})" title="AI fills all picks up to and including this one">⏩ Sim to here</button>`
         : '';
       actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
+        ${tradeBtnHtml}
         ${simBtnHtml}
         ${simToHereHtml}
       </div>`;
@@ -3135,13 +3410,10 @@ function renderDraftBoard() {
       // re-appears on their next upcoming pick.
       const isUsersNextPick = (p === userNext);
       const showSimButton = isUsersNextPick && !isNextPick;
-      if (showSimButton) {
-        actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
-          <button class="btn xs" onclick="simUntilPick(${p - 1})" title="AI fills all picks before this one; you pick here">⏩ Sim until your pick</button>
-        </div>`;
-      } else {
-        actionHtml = '';
-      }
+      actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
+        ${tradeBtnHtml}
+        ${showSimButton ? `<button class="btn xs" onclick="simUntilPick(${p - 1})" title="AI fills all picks before this one; you pick here">⏩ Sim until your pick</button>` : ''}
+      </div>`;
     }
 
     // Only the NEXT overall unfilled pick is clickable and shows a prompt.
@@ -3438,6 +3710,265 @@ function clearPick(slot) {
   delete STATE.selections[slot];
   saveState();
   renderDraftBoard();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  TRADE MODAL (Phase 2c) — skeleton
+// ═══════════════════════════════════════════════════════════════════
+
+// Transient state for the currently-open trade modal.
+// Reset on openTradeModal() and closeTradeModal().
+let _tradeState = null;
+//  { teamA, teamB, pickNum (the pick row the user clicked to open),
+//    assetsA: Set<assetId>, assetsB: Set<assetId> }
+
+// Called from the per-row Trade button. pickNum tells us the "initiator" team.
+function openTradeModal(pickNum) {
+  if (!tradeDataReady) {
+    alert('Trade data is still loading — please try again in a moment.');
+    return;
+  }
+  const slot = currentPickSlots[pickNum];
+  if (!slot) return;
+
+  _tradeState = {
+    teamA: slot.team,
+    teamB: null,
+    pickNum: pickNum,
+    assetsA: new Set(),
+    assetsB: new Set(),
+  };
+
+  // Render header for Team A
+  const headerA = document.getElementById('trade-team-a');
+  headerA.innerHTML = `${teamLogoOnly(slot.team, 24)} <span>${escapeHtml(TEAM_FULL_NAME[slot.team] || slot.team)}</span>`;
+
+  // Populate partner dropdown with all teams except A
+  const sel = document.getElementById('trade-team-b-select');
+  const opts = ['<option value="">Select a team…</option>'];
+  const sorted = [...ALL_NBA_TEAMS]
+    .filter(t => t !== slot.team)
+    .sort((a, b) => (TEAM_FULL_NAME[a] || a).localeCompare(TEAM_FULL_NAME[b] || b));
+  for (const t of sorted) {
+    opts.push(`<option value="${t}">${escapeHtml(TEAM_FULL_NAME[t] || t)}</option>`);
+  }
+  sel.innerHTML = opts.join('');
+  sel.value = '';
+
+  // Reset panels + summary for a fresh modal
+  document.getElementById('trade-panel-a-header').textContent = `${TEAM_FULL_NAME[slot.team] || slot.team} sends —`;
+  document.getElementById('trade-panel-b-header').textContent = '— sends —';
+  document.getElementById('trade-panel-a-body').innerHTML = '<div class="trade-empty-state">Select a trade partner to start.</div>';
+  document.getElementById('trade-panel-b-body').innerHTML = '<div class="trade-empty-state">Select a trade partner to start.</div>';
+  resetTradeSummary();
+
+  document.getElementById('trade-modal').style.display = 'flex';
+}
+
+function closeTradeModal() {
+  document.getElementById('trade-modal').style.display = 'none';
+  _tradeState = null;
+}
+
+// User selected a trade partner from the dropdown
+function onTradePartnerChanged(teamB) {
+  if (!_tradeState) return;
+  if (!teamB) {
+    _tradeState.teamB = null;
+    document.getElementById('trade-panel-a-body').innerHTML = '<div class="trade-empty-state">Select a trade partner to start.</div>';
+    document.getElementById('trade-panel-b-body').innerHTML = '<div class="trade-empty-state">Select a trade partner to start.</div>';
+    document.getElementById('trade-panel-b-header').textContent = '— sends —';
+    resetTradeSummary();
+    return;
+  }
+  _tradeState.teamB = teamB;
+  _tradeState.assetsA.clear();
+  _tradeState.assetsB.clear();
+
+  document.getElementById('trade-panel-b-header').textContent = `${TEAM_FULL_NAME[teamB] || teamB} sends —`;
+  renderTradeAssetsPanel('A');
+  renderTradeAssetsPanel('B');
+  recomputeTradeSummary();
+}
+
+// Render one side's asset panel. Grouping: 2026 picks, Future picks, Roster.
+function renderTradeAssetsPanel(side) {
+  const team = side === 'A' ? _tradeState.teamA : _tradeState.teamB;
+  const body = document.getElementById(`trade-panel-${side.toLowerCase()}-body`);
+  const selected = side === 'A' ? _tradeState.assetsA : _tradeState.assetsB;
+  if (!team) { body.innerHTML = '<div class="trade-empty-state">Select a trade partner to start.</div>'; return; }
+
+  let html = '';
+
+  // Section 1: 2026 picks still unfilled
+  const pick2026 = [];
+  for (const [pnStr, slot] of Object.entries(currentPickSlots)) {
+    const pn = parseInt(pnStr);
+    if (slot.team !== team) continue;
+    if (STATE.selections[pn]) continue;  // already drafted — can't trade
+    pick2026.push(pn);
+  }
+  pick2026.sort((a, b) => a - b);
+  if (pick2026.length) {
+    html += `<div class="trade-asset-section"><div class="trade-asset-section-label">2026 Draft Picks</div>`;
+    for (const pn of pick2026) {
+      const assetId = `pick2026-${pn}`;
+      const val = slotPickValues[pn] || 0;
+      const rnd = pn <= 30 ? '1st' : '2nd';
+      const isSel = selected.has(assetId);
+      html += `<label class="trade-asset ${isSel ? 'selected' : ''}">
+        <input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleTradeAsset('${side}', '${assetId}', this.checked)">
+        <div>
+          <div class="trade-asset-name">#${pn} ${rnd} round pick</div>
+          <div class="trade-asset-meta">2026</div>
+        </div>
+        <div class="trade-asset-value">$${fmtM(val)}</div>
+      </label>`;
+    }
+    html += '</div>';
+  }
+
+  // Section 2: Future picks (2027+)
+  const futures = futurePickInventory[team] || [];
+  if (futures.length) {
+    html += `<div class="trade-asset-section"><div class="trade-asset-section-label">Future Picks</div>`;
+    // Sort by year then round
+    const sorted = [...futures].sort((a, b) => {
+      if (a.year !== b.year) return a.year.localeCompare(b.year);
+      return a.round.localeCompare(b.round);
+    });
+    for (const fp of sorted) {
+      const assetId = `pickFuture-${fp.id}`;
+      const val = estimateFuturePickValue(fp);
+      const isSel = selected.has(assetId);
+      const notes = fp.notes && fp.notes !== 'Own pick' ? fp.notes : '';
+      const sureLabel = fp.sure ? '' : ' <span style="color:var(--red)">(conditional)</span>';
+      html += `<label class="trade-asset ${isSel ? 'selected' : ''}">
+        <input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleTradeAsset('${side}', '${assetId}', this.checked)">
+        <div>
+          <div class="trade-asset-name">${fp.year} ${fp.round} round${sureLabel}</div>
+          ${notes ? `<div class="trade-asset-meta" title="${escapeHtml(notes)}">${escapeHtml(notes.substring(0, 40))}${notes.length > 40 ? '…' : ''}</div>` : ''}
+        </div>
+        <div class="trade-asset-value">$${fmtM(val)}</div>
+      </label>`;
+    }
+    html += '</div>';
+  }
+
+  // Section 3: Roster players
+  const roster = teamRosters[team] || [];
+  if (roster.length) {
+    html += `<div class="trade-asset-section"><div class="trade-asset-section-label">Roster</div>`;
+    // Sort by Real Value descending (best players first)
+    const sorted = [...roster].sort((a, b) => {
+      const va = playerValues[a.name.toLowerCase()] || 0;
+      const vb = playerValues[b.name.toLowerCase()] || 0;
+      return vb - va;
+    });
+    for (const p of sorted) {
+      const assetId = `player-${p.name}`;
+      const val = playerValues[p.name.toLowerCase()] || 0;
+      const isSel = selected.has(assetId);
+      const meta = [p.position, p.age].filter(Boolean).join(' · ');
+      html += `<label class="trade-asset ${isSel ? 'selected' : ''}">
+        <input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleTradeAsset('${side}', '${assetId}', this.checked)">
+        <div>
+          <div class="trade-asset-name">${escapeHtml(p.name)}</div>
+          ${meta ? `<div class="trade-asset-meta">${escapeHtml(meta)}</div>` : ''}
+        </div>
+        <div class="trade-asset-value">$${fmtM(val)}</div>
+      </label>`;
+    }
+    html += '</div>';
+  }
+
+  if (!html) html = '<div class="trade-empty-state">No tradeable assets.</div>';
+  body.innerHTML = html;
+}
+
+function toggleTradeAsset(side, assetId, checked) {
+  if (!_tradeState) return;
+  const set = side === 'A' ? _tradeState.assetsA : _tradeState.assetsB;
+  if (checked) set.add(assetId); else set.delete(assetId);
+  // Just re-render value updates (keep the modal open, don't reset scroll)
+  recomputeTradeSummary();
+  // Update the visual selected-state by toggling class
+  const labels = document.querySelectorAll(`#trade-panel-${side.toLowerCase()}-body .trade-asset`);
+  // Simpler: re-render the panel — fine since the checkbox state is stored in _tradeState
+  renderTradeAssetsPanel(side);
+}
+
+// Estimate $ value of a future pick. Very rough heuristic for v1:
+// - Conditional picks (sure:false) discounted ~40%
+// - 1sts decline ~10% per year out from 2027
+// - 2nds are ~$1.5M flat
+function estimateFuturePickValue(fp) {
+  if (fp.round === '2nd') return fp.sure ? 1.5 : 0.8;
+  const yearNum = parseInt(fp.year) || 2027;
+  const yearsOut = Math.max(0, yearNum - 2027);
+  const base = 12 * Math.pow(0.9, yearsOut);  // 2027 1st ~$12M, decays
+  return fp.sure ? base : base * 0.55;
+}
+
+function resetTradeSummary() {
+  document.getElementById('trade-val-a').textContent = '$0';
+  document.getElementById('trade-val-b').textContent = '$0';
+  const d = document.getElementById('trade-val-delta');
+  d.textContent = 'Δ $0';
+  d.className = 'trade-summary-delta';
+  document.getElementById('trade-warnings').innerHTML = '';
+  document.getElementById('trade-confirm-btn').disabled = true;
+}
+
+// Sum asset values on each side, show delta, validate (turn 3 will add Stepien)
+function recomputeTradeSummary() {
+  if (!_tradeState || !_tradeState.teamB) { resetTradeSummary(); return; }
+  const sumSide = (team, assets) => {
+    let total = 0;
+    for (const id of assets) {
+      if (id.startsWith('pick2026-')) {
+        const pn = parseInt(id.substring('pick2026-'.length));
+        total += slotPickValues[pn] || 0;
+      } else if (id.startsWith('pickFuture-')) {
+        const fpId = id.substring('pickFuture-'.length);
+        const fp = (futurePickInventory[team] || []).find(x => x.id === fpId);
+        if (fp) total += estimateFuturePickValue(fp);
+      } else if (id.startsWith('player-')) {
+        const name = id.substring('player-'.length);
+        total += playerValues[name.toLowerCase()] || 0;
+      }
+    }
+    return total;
+  };
+  const valA = sumSide(_tradeState.teamA, _tradeState.assetsA);
+  const valB = sumSide(_tradeState.teamB, _tradeState.assetsB);
+  const delta = valB - valA;  // positive = Team A gains
+
+  document.getElementById('trade-val-a').textContent = '$' + fmtM(valA);
+  document.getElementById('trade-val-b').textContent = '$' + fmtM(valB);
+  const d = document.getElementById('trade-val-delta');
+  const sign = delta > 0 ? '+' : (delta < 0 ? '−' : '');
+  d.textContent = `Δ ${sign}$${fmtM(Math.abs(delta))}`;
+  d.className = 'trade-summary-delta ' + (delta > 0 ? 'positive' : delta < 0 ? 'negative' : '');
+
+  // Enable confirm only if both sides have at least one asset
+  const canConfirm = _tradeState.assetsA.size > 0 && _tradeState.assetsB.size > 0;
+  document.getElementById('trade-confirm-btn').disabled = !canConfirm;
+
+  // Warnings (turn 3 will add Stepien enforcement)
+  document.getElementById('trade-warnings').innerHTML = '';
+}
+
+// Placeholder — actual swap logic in turn 4
+function confirmTrade() {
+  alert('Trade confirmation logic coming next turn. Modal will close for now.');
+  closeTradeModal();
+}
+
+// Format a $ amount in millions with up to 1 decimal (no trailing .0)
+function fmtM(val) {
+  const v = Math.round(val * 10) / 10;
+  return (v === Math.floor(v)) ? String(Math.floor(v)) + 'M' : v.toFixed(1) + 'M';
 }
 
 // Return the pick number of the user's next unfilled pick, or null if none remain
@@ -3750,6 +4281,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Escape') {
       const im = document.getElementById('image-modal');
       if (im && im.style.display === 'flex') closeImageModal();
+      const tm = document.getElementById('trade-modal');
+      if (tm && tm.style.display === 'flex') closeTradeModal();
     }
   });
 
