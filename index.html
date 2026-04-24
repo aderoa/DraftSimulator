@@ -3702,13 +3702,10 @@ window.addEventListener('message', function(event) {
   const iframe = document.getElementById('tm-iframe');
   if (!modal || modal.style.display !== 'flex') return;
 
-  console.log('[DS] TM message received:', type, event.data);
-
   if (type === 'ROSTER_MANAGER_TM_READY') {
     // Push current DS pick state into TM so it reflects post-lottery ownership.
     const picks = buildDSPicksPayload();
     if (iframe && iframe.contentWindow && picks.length) {
-      console.log('[DS] Sending', picks.length, 'picks to TM');
       iframe.contentWindow.postMessage({ type: 'ROSTER_MANAGER_PICKS', picks }, '*');
     }
     return;
@@ -3716,7 +3713,6 @@ window.addEventListener('message', function(event) {
 
   if (type === 'ROSTER_MANAGER_TRADE') {
     // User confirmed a trade in TM. Apply it to DS state, record it, re-render.
-    console.log('[DS] TRADE payload full:', JSON.stringify(event.data, null, 2));
     try {
       applyTradeFromTM(event.data);
     } catch (e) {
@@ -3755,12 +3751,8 @@ function applyTradeFromTM(payload) {
     picksIn:  payload.picksIn  || [],
   };
 
-  console.log('[DS] applyTradeFromTM — dsTeam:', dsTeam);
-  console.log('[DS] picksOut:', trade.picksOut);
-  console.log('[DS] picksIn:', trade.picksIn);
-
   // Extract pick number from TM's notes string.
-  // applyRMPicks formats it as: "#<N> pick · ..." — so we grep for # followed by digits.
+  // applyRMPicks formats it as: "#<N> pick · ..." — we grep for # followed by digits.
   const pickNumFromNotes = (notes) => {
     if (!notes) return null;
     const m = /#(\d+)\b/.exec(String(notes));
@@ -3768,80 +3760,42 @@ function applyTradeFromTM(payload) {
   };
 
   // The counterparty (partner) team. TM doesn't flag this explicitly for
-  // picksOut, so we infer from picksIn[].fromTeam or in[].fromTeam.
-  // Fallback: find the ONE team (other than dsTeam) that appears in any
-  // counterparty field — a two-team trade has exactly one partner.
-  let partnerTeam =
+  // picksOut entries, so infer from picksIn[].fromTeam or in[].fromTeam.
+  const partnerTeam =
     (trade.picksIn[0] && trade.picksIn[0].fromTeam) ||
     (trade.in[0] && trade.in[0].fromTeam) ||
     null;
-
-  // If still null but we know dsTeam, walk currentPickSlots for a team that's
-  // NOT dsTeam and appears on the outgoing picks. This handles pure-player trades
-  // with picks only going one direction.
-  if (!partnerTeam) {
-    for (const p of trade.picksOut) {
-      if (p.year !== '2026') continue;
-      // No reliable partner info — skip pick swap for this trade.
-    }
-  }
-
-  console.log('[DS] partnerTeam inferred as:', partnerTeam);
 
   let pickSwaps = 0;
 
   // Picks DS-team is sending → new owner = partner
   for (const p of trade.picksOut) {
-    if (p.year !== '2026') {
-      console.log('[DS] Skipping non-2026 picksOut entry:', p);
-      continue;
-    }
+    if (p.year !== '2026') continue;
     const pn = pickNumFromNotes(p.notes);
-    console.log('[DS] picksOut — extracted pick#', pn, 'from notes:', p.notes);
-    if (!pn || !currentPickSlots[pn]) {
-      console.warn('[DS] Could not locate currentPickSlots[' + pn + ']');
-      continue;
-    }
-    if (STATE.selections[pn]) {
-      console.warn('[DS] Pick', pn, 'already drafted — cannot transfer');
-      continue;
-    }
+    if (!pn || !currentPickSlots[pn]) continue;
+    if (STATE.selections[pn]) continue;  // already drafted
     if (partnerTeam) {
-      console.log(`[DS] Transferring pick #${pn}: ${currentPickSlots[pn].team} -> ${partnerTeam}`);
       currentPickSlots[pn].team = partnerTeam;
       pickSwaps++;
-    } else {
-      console.warn('[DS] No partnerTeam known; cannot reassign outgoing pick', pn);
     }
   }
   // Picks DS-team is receiving → new owner = dsTeam
   for (const p of trade.picksIn) {
-    if (p.year !== '2026') {
-      console.log('[DS] Skipping non-2026 picksIn entry:', p);
-      continue;
-    }
+    if (p.year !== '2026') continue;
     const pn = pickNumFromNotes(p.notes);
-    console.log('[DS] picksIn — extracted pick#', pn, 'from notes:', p.notes);
-    if (!pn || !currentPickSlots[pn]) {
-      console.warn('[DS] Could not locate currentPickSlots[' + pn + ']');
-      continue;
-    }
-    if (STATE.selections[pn]) {
-      console.warn('[DS] Pick', pn, 'already drafted — cannot transfer');
-      continue;
-    }
-    console.log(`[DS] Transferring pick #${pn}: ${currentPickSlots[pn].team} -> ${dsTeam}`);
+    if (!pn || !currentPickSlots[pn]) continue;
+    if (STATE.selections[pn]) continue;
     currentPickSlots[pn].team = dsTeam;
     pickSwaps++;
   }
 
-  // Record the trade (rendered in recap + future trade log view)
+  // Record the trade (for recap + future trade log view)
   if (!STATE.trades) STATE.trades = [];
   STATE.trades.push(trade);
 
   saveState();
   renderDraftBoard();
-  console.log(`[DS] Applied trade — ${pickSwaps} pick(s) reassigned. Trade:`, trade);
+  console.log(`[DS] Trade applied: ${pickSwaps} pick(s) swapped`);
 }
 
 // Format a $ amount with thousands separators (e.g. 5105127 -> "$5,105,127").
