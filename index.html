@@ -1009,7 +1009,17 @@
     background: rgba(234,88,12,0.06);
     border-radius: 8px;
   }
-  .lot-pick-header.redraw { color: var(--red); }
+  .lot-pick-header.redraw {
+    color: var(--red);
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+    line-height: 1.4;
+    max-width: 100%;
+  }
+  .lot-pick-header.redraw .team-badge { font-weight: 700; }
   .lot-pick-header.winner { color: var(--green); }
 
   .lot-team-row {
@@ -2042,6 +2052,7 @@ function startDrawRoomLottery() {
     picksResolved: [], phase: 'ready',
     wonTeamIdxs: new Set(),
     finalistCombos: null,
+    redrawReason: null,
   };
   document.getElementById('active-lottery').style.display = '';
   document.getElementById('active-lottery-title').textContent = '🎱 Draft Lottery Draw Room';
@@ -2072,14 +2083,32 @@ function drawNextBall() {
 
       if (teamIdx === undefined || lot.wonTeamIdxs.has(teamIdx)) {
         // Invalid combo or already-won team → redraw
+        // Capture WHY for the UI: either it's the unassigned 1001st combo
+        // (doesn't belong to anyone) or it belongs to an already-won team.
+        if (teamIdx === undefined) {
+          lot.redrawReason = {
+            type: 'unassigned',
+            combo: sorted,
+          };
+        } else {
+          const ownerTeam = lot.teams[teamIdx];
+          const wonPick = lot.picksResolved.find(p => p.team === ownerTeam.team);
+          lot.redrawReason = {
+            type: 'alreadyWon',
+            combo: sorted,
+            ownerTeam: ownerTeam.team,
+            wonPick: wonPick ? wonPick.pick : null,
+          };
+        }
         lot.phase = 'redraw';
         renderDrawRoom();
         _drawTimer = setTimeout(() => {
           lot.drawnBalls = [];
           lot.finalistCombos = null;
+          lot.redrawReason = null;
           lot.phase = 'ready';
           renderDrawRoom();
-        }, 1500);
+        }, 2800);
         return;
       }
       const winner = lot.teams[teamIdx];
@@ -2228,7 +2257,21 @@ function renderDrawRoom() {
   if (lot.phase === 'mixing') {
     h += `<div class="lot-pick-header" style="color:var(--muted)">🔄 Mixing balls…</div>`;
   } else if (lot.phase === 'redraw') {
-    h += `<div class="lot-pick-header redraw">❌ Invalid combination — redrawing…</div>`;
+    // Describe WHY the combination was invalid — either the 1001st
+    // "unassigned" combo or a combo belonging to a team that already won.
+    const r = lot.redrawReason;
+    let msg = '❌ Invalid combination — redrawing…';
+    if (r) {
+      const comboStr = r.combo.join(' · ');
+      if (r.type === 'unassigned') {
+        msg = `❌ ${comboStr} is the unassigned combo (no team owns it) — redrawing…`;
+      } else if (r.type === 'alreadyWon') {
+        const ownerBadge = teamBadge(r.ownerTeam);
+        const wonSuffix = r.wonPick ? ` (won pick #${r.wonPick})` : ' (already a winner)';
+        msg = `❌ ${comboStr} belongs to ${ownerBadge}${wonSuffix} — redrawing…`;
+      }
+    }
+    h += `<div class="lot-pick-header redraw">${msg}</div>`;
   } else if (lot.phase === 'winner') {
     const w = lot.picksResolved[lot.picksResolved.length - 1];
     h += `<div class="lot-pick-header winner">🎉 Pick #${w.pick}: ${teamBadge(w.team)}</div>`;
@@ -2569,13 +2612,21 @@ async function downloadRecapImage() {
   // Open a minimal loading modal first so the user gets instant feedback
   openImageModal('<div class="img-modal-loading"><div class="spinner" style="display:block;margin:0 auto 12px;width:30px;height:30px"></div>Generating image…</div>');
 
-  // Build an off-screen rendering container with a brand header so the output
-  // image has context when shared outside the app.
+  // Build an off-screen rendering container. Keep it in the viewport (visible
+  // but offscreen) rather than left:-99999px because html2canvas has issues
+  // with extreme negative positioning in some Chrome versions.
   const offscreen = document.createElement('div');
+  offscreen.id = 'recap-export-offscreen';
   offscreen.style.cssText = `
-    position: fixed; left: -99999px; top: 0;
-    width: 780px; padding: 24px; background: #fff;
+    position: fixed;
+    top: 0; left: 0;
+    width: 780px;
+    padding: 24px;
+    background: #fff;
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    opacity: 0;
+    pointer-events: none;
+    z-index: -1;
   `;
 
   const header = document.createElement('div');
@@ -2584,39 +2635,34 @@ async function downloadRecapImage() {
     padding: 12px 0 18px; margin-bottom: 16px;
     border-bottom: 2px solid #1a1a2e;
   `;
-  const titleGroup = `
+  header.innerHTML = `
     <div>
       <div style="font-size: 1.5rem; font-weight: 800; color: #1a1a2e; letter-spacing: -0.01em;">2026 NBA Draft Simulator</div>
       <div style="font-size: 0.82rem; color: #6b7280; margin-top: 2px;">Your mock draft recap</div>
     </div>
     <div style="font-size: 0.72rem; color: #9ca3af; font-family: 'JetBrains Mono', monospace;">hoopsmatic.com/draft-simulator</div>
   `;
-  header.innerHTML = titleGroup;
   offscreen.appendChild(header);
 
-  // Clone the recap panel so we don't break layout of the live DOM
+  // Clone the recap panel (without action bar)
   const clone = panel.cloneNode(true);
-  // Remove the action bar from the clone (buttons shouldn't be in the image)
-  const actionBar = clone.querySelector('.recap-actions');
-  if (actionBar) actionBar.remove();
+  clone.querySelectorAll('.recap-actions').forEach(el => el.remove());
+  offscreen.appendChild(clone);
+  document.body.appendChild(offscreen);
 
-  // CORS workaround for Chrome: the NBA CDN doesn't send CORS headers, so
-  // html2canvas (even with useCORS:true) can't rasterize the logos without
-  // tainting the canvas. Fix: route logo URLs through our Worker's /api/logo
-  // proxy (which adds CORS headers), fetch, and inline as a data: URL. Data
-  // URLs are same-origin so html2canvas reads them fine.
+  // Proxy NBA logos via Worker (which adds CORS headers), then inline as
+  // base64 data: URLs so html2canvas can read them without tainting the canvas.
   function proxyLogoUrl(url) {
-    // cdn.nba.com/logos/nba/{teamId}/global/L/logo.svg → hoopsmatic.com proxy
     const m = url.match(/cdn\.nba\.com\/logos\/nba\/(\d+)\//);
     if (m) return 'https://hoopsmatic.com/api/logo?teamId=' + m[1];
-    return url;  // non-NBA URLs (flags, etc.) fall through
+    return url;
   }
 
   async function imageToDataUri(url) {
     try {
       const fetchUrl = proxyLogoUrl(url);
       const res = await fetch(fetchUrl, { mode: 'cors', credentials: 'omit' });
-      if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+      if (!res.ok) throw new Error('Fetch ' + res.status);
       const blob = await res.blob();
       return await new Promise((resolve, reject) => {
         const fr = new FileReader();
@@ -2630,40 +2676,48 @@ async function downloadRecapImage() {
     }
   }
 
-  const imgs = Array.from(clone.querySelectorAll('img'));
-  const imageLoadPromises = imgs.map(async (oldImg) => {
-    const url = oldImg.src;
+  // Convert every img in the clone to data URI, in parallel
+  const imgs = Array.from(offscreen.querySelectorAll('img'));
+  let failedCount = 0;
+  await Promise.all(imgs.map(async (img) => {
+    const url = img.src;
     if (url.startsWith('data:')) return;
     const dataUri = await imageToDataUri(url);
     if (dataUri) {
-      oldImg.src = dataUri;
-      oldImg.setAttribute('width', oldImg.width || 24);
-      oldImg.setAttribute('height', oldImg.height || 24);
+      img.src = dataUri;
     } else {
-      oldImg.remove();
+      failedCount++;
+      img.remove();
     }
-  });
+  }));
 
-  offscreen.appendChild(clone);
-  document.body.appendChild(offscreen);
+  if (failedCount > 0) {
+    console.warn('[DS] ' + failedCount + ' logos failed to inline (proxy may not be deployed)');
+  }
 
-  // Wait for all images to convert to data URIs
-  await Promise.all(imageLoadPromises);
+  // Brief delay so the browser commits the data-URI src changes before
+  // html2canvas snapshots the DOM
+  await new Promise(r => setTimeout(r, 150));
 
   try {
     const canvas = await html2canvas(offscreen, {
       backgroundColor: '#ffffff',
-      scale: 2,                // 2x for retina
-      useCORS: true,           // needed for NBA CDN logos
+      scale: 2,
+      useCORS: true,
       allowTaint: false,
       logging: false,
+      width: offscreen.offsetWidth || 780,
+      height: offscreen.offsetHeight,
     });
 
-    // Show image in modal with copy/download buttons
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw new Error('Canvas is empty — rendering failed');
+    }
+
     canvas.toBlob(blob => {
-      if (!blob) {
+      if (!blob || blob.size < 500) {
         closeImageModal();
-        alert('Could not generate image.');
+        alert('The image could not be generated. If you see NBA logo errors in the browser console, the /api/logo proxy needs to be deployed on the Worker.');
         return;
       }
       const url = URL.createObjectURL(blob);
@@ -2672,9 +2726,9 @@ async function downloadRecapImage() {
   } catch (e) {
     console.error('[DS] Failed to generate image:', e);
     closeImageModal();
-    alert('Could not generate image. Please try again.');
+    alert('Could not generate image: ' + e.message);
   } finally {
-    document.body.removeChild(offscreen);
+    if (offscreen.parentNode) offscreen.parentNode.removeChild(offscreen);
   }
 }
 
@@ -2691,7 +2745,8 @@ function showImagePreview(objectUrl, blob) {
       <button class="btn" onclick="downloadImageBlob()">⬇️ Download PNG</button>
     </div>
     <div class="img-modal-hint">On mobile, long-press the image to save or share.</div>
-    <img class="img-modal-img" src="${objectUrl}" alt="Draft recap preview">
+    <img class="img-modal-img" src="${objectUrl}" alt="Draft recap preview" onerror="document.getElementById('img-modal-error').style.display='block';this.style.display='none'">
+    <div id="img-modal-error" style="display:none;padding:20px;text-align:center;color:var(--red);font-size:0.85rem;border:1px solid var(--red);border-radius:8px;background:rgba(239,68,68,0.05)">⚠️ The preview image couldn't be rendered. Try "Download PNG" below — the file may still be valid.</div>
   `;
   openImageModal(html);
 }
@@ -2866,10 +2921,16 @@ function renderDraftBoard() {
       </div>`;
     } else if (inTeamMode && isUserPick) {
       // User pick — gold row highlighting makes ownership clear, no label needed.
-      // Only show "Sim until your pick" if there ARE earlier unfilled picks to
-      // sim (i.e., this is NOT the next-upcoming pick in the draft). If it's
-      // already the next pick, there's nothing to sim — user just clicks.
-      if (!isNextPick) {
+      //
+      // Button visibility rule:
+      // - Only show on the USER'S NEXT upcoming pick (not later user picks)
+      // - Hide once this IS the literal next overall pick (nothing to sim)
+      // Result: at any moment, the user sees one "Sim until your pick" button
+      // pointing at their imminent selection. Once they pick, the button
+      // re-appears on their next upcoming pick.
+      const isUsersNextPick = (p === userNext);
+      const showSimButton = isUsersNextPick && !isNextPick;
+      if (showSimButton) {
         actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
           <button class="btn xs" onclick="simUntilPick(${p - 1})" title="AI fills all picks before this one; you pick here">⏩ Sim until your pick</button>
         </div>`;
