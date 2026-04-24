@@ -212,7 +212,7 @@
   }
   .board-row {
     display: grid;
-    grid-template-columns: 48px 200px 1fr auto;
+    grid-template-columns: 48px 200px 1fr 180px;
     gap: 10px;
     align-items: center;
     padding: 8px 16px;
@@ -536,6 +536,80 @@
     width: 20px;
     height: 20px;
     object-fit: contain;
+  }
+
+  /* ── Top-4 lottery highlighting + delta arrows ── */
+  .lottery-top4-row {
+    background: linear-gradient(to right, rgba(234,88,12,0.12), rgba(234,88,12,0.04));
+    font-weight: 600;
+  }
+  .lottery-top4-row td {
+    border-top: 1px solid rgba(234,88,12,0.3);
+    border-bottom: 1px solid rgba(234,88,12,0.3);
+  }
+  .lottery-top4-row + .lottery-top4-row td {
+    border-top: none;
+  }
+  .pick-top4 {
+    color: var(--accent) !important;
+    font-weight: 800 !important;
+  }
+  /* Combined user-team + top-4 */
+  .lottery-user-row.lottery-top4-row {
+    background: linear-gradient(to right, rgba(234,88,12,0.18), rgba(234,88,12,0.08));
+    border-left: 3px solid var(--accent);
+  }
+
+  .delta {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 0.8rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: inline-block;
+    min-width: 38px;
+    text-align: center;
+  }
+  .delta-up {
+    color: #16a34a;
+    background: rgba(22,163,74,0.1);
+  }
+  .delta-down {
+    color: #dc2626;
+    background: rgba(220,38,38,0.1);
+  }
+  .delta-same {
+    color: var(--dim);
+  }
+
+  /* ── Inline sim buttons on draft rows ── */
+  .sim-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .btn.xs {
+    font-size: 0.7rem;
+    padding: 4px 8px;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .your-pick-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    padding: 4px 10px;
+    border: 1.5px dashed var(--accent);
+    border-radius: 5px;
+    background: rgba(234,88,12,0.05);
+    white-space: nowrap;
+  }
+  @media (max-width: 700px) {
+    .sim-actions .btn.xs { font-size: 0.65rem; padding: 3px 6px; }
+    /* On mobile, stack sim buttons vertically */
+    .sim-actions { flex-direction: column; gap: 3px; }
   }
 
   /* ── Summary / stats strip ── */
@@ -874,7 +948,6 @@
     <div class="toolbar">
       <button id="btn-run-lottery" class="btn primary" onclick="startLottery()">Run Lottery</button>
       <button id="btn-rerun-lottery" class="btn" onclick="rerunLottery()" style="display:none">🎲 Re-run Lottery</button>
-      <button id="btn-reset-lottery" class="btn" onclick="resetLottery()">Reset</button>
       <div class="spacer"></div>
       <span id="user-team-display-lottery"></span>
       <button class="btn team-ctl-btn" id="btn-team-ctl-lottery" onclick="handleTeamCtlClick()">🏀 Select Team</button>
@@ -909,7 +982,7 @@
 
     <div class="toolbar">
       <button class="btn" onclick="clearAllPicks()">Clear All Picks</button>
-      <button class="btn" onclick="autoFillDefaults()">Auto-Fill Default Prospects</button>
+      <button class="btn" id="btn-auto-fill-all" onclick="autoFillAllAI()" style="display:none">⚡ Auto-Fill All 60 Picks</button>
       <div class="spacer"></div>
       <span id="user-team-display-draft"></span>
       <button class="btn team-ctl-btn" id="btn-team-ctl-draft" onclick="handleTeamCtlClick()">🏀 Select Team</button>
@@ -1932,30 +2005,44 @@ function renderLottery() {
   const resEl = document.getElementById('lottery-results-table');
   const runBtn = document.getElementById('btn-run-lottery');
   const rerunBtn = document.getElementById('btn-rerun-lottery');
-  const resetBtn = document.getElementById('btn-reset-lottery');
   if (!STATE.lotteryResults) {
     resEl.innerHTML = '<div class="empty-state"><b>No lottery run yet</b>Click "Run Lottery" to simulate the draft order.</div>';
     runBtn.style.display = '';
     rerunBtn.style.display = 'none';
-    resetBtn.disabled = true;
   } else {
-    let rhtml = '<table><thead><tr><th>Pick</th><th>Seed</th><th>Team</th></tr></thead><tbody>';
+    let rhtml = '<table><thead><tr><th>Pick</th><th>Seed</th><th>Team</th><th>Δ</th></tr></thead><tbody>';
     for (const r of STATE.lotteryResults) {
       const current = currentPickSlots[r.pick];
       const finalTeam = current ? current.team : r.team;
       const changed = finalTeam !== r.team;
       const isUserTeam = STATE.userTeam && (r.team === STATE.userTeam || finalTeam === STATE.userTeam);
-      rhtml += `<tr class="${isUserTeam ? 'lottery-user-row' : ''}">
-        <td><span class="pick-num">#${r.pick}</span></td>
+      const isTop4 = r.pick <= 4;
+      // Delta: positive = moved up (better pick than original seed), negative = moved down.
+      // Seed 5 landing at pick 1 → delta = +4 (moved UP). Seed 1 landing at pick 5 → delta = -4.
+      const delta = r.originalSlot - r.pick;
+      let deltaHtml;
+      if (delta > 0) {
+        deltaHtml = `<span class="delta delta-up">▲${delta}</span>`;
+      } else if (delta < 0) {
+        deltaHtml = `<span class="delta delta-down">▼${Math.abs(delta)}</span>`;
+      } else {
+        deltaHtml = `<span class="delta delta-same">—</span>`;
+      }
+      const rowCls = [
+        isUserTeam ? 'lottery-user-row' : '',
+        isTop4 ? 'lottery-top4-row' : ''
+      ].filter(Boolean).join(' ');
+      rhtml += `<tr class="${rowCls}">
+        <td><span class="pick-num ${isTop4 ? 'pick-top4' : ''}">#${r.pick}</span></td>
         <td>${r.originalSlot}</td>
         <td>${teamBadge(r.team)}${changed ? ' <span class="transfer-arrow">→</span> ' + teamBadge(finalTeam) : ''}</td>
+        <td>${deltaHtml}</td>
       </tr>`;
     }
     rhtml += '</tbody></table>';
     resEl.innerHTML = rhtml;
     runBtn.style.display = 'none';
     rerunBtn.style.display = '';
-    resetBtn.disabled = false;
   }
 
   // Transfers panel
@@ -1979,6 +2066,12 @@ function renderLottery() {
 function renderDraftBoard() {
   const boardEl = document.getElementById('draft-board');
   const statsEl = document.getElementById('draft-stats');
+
+  // Toolbar buttons visibility by mode
+  const autoFillBtn = document.getElementById('btn-auto-fill-all');
+  if (autoFillBtn) {
+    autoFillBtn.style.display = STATE.userTeam ? 'none' : '';
+  }
 
   const picks = Object.keys(currentPickSlots).map(n => parseInt(n)).sort((a,b) => a-b);
   if (!picks.length) {
@@ -2013,15 +2106,32 @@ function renderDraftBoard() {
     const prospect = sel || null;
     const isEmpty = !prospect;
     const bio = prospect ? prospectBio(prospect) : '';
+    const isUserPick = STATE.userTeam && slot.team === STATE.userTeam;
+    const inTeamMode = !!STATE.userTeam;
 
-    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${STATE.userTeam && slot.team === STATE.userTeam ? 'user-team' : ''}" onclick="openPicker(${p})">
+    // Build right-side action UI
+    let actionHtml = '';
+    if (prospect) {
+      actionHtml = `<button class="clear-btn" onclick="event.stopPropagation();clearPick(${p})" title="Clear selection">✕</button>`;
+    } else if (inTeamMode && !isUserPick) {
+      // Sim buttons only for non-user empty picks in team mode
+      actionHtml = `<div class="sim-actions" onclick="event.stopPropagation()">
+        <button class="btn xs" onclick="simSinglePick(${p})" title="AI picks for this slot">⚡ Sim</button>
+        <button class="btn xs" onclick="simUntilPick(${p})" title="AI fills all picks before this one (stops at your picks)">⏩ Sim until here</button>
+      </div>`;
+    } else if (inTeamMode && isUserPick) {
+      // User pick — prompt to select
+      actionHtml = `<span class="your-pick-label">YOUR PICK</span>`;
+    }
+
+    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}" data-pick="${p}" onclick="openPicker(${p})">
       <div class="pick-col">#${p}</div>
       <div class="team-col">${teamBadge(slot.team)}</div>
       <div class="prospect-col">
-        <span class="prospect-name">${prospect ? escapeHtml(prospect) : 'Click to select prospect…'}</span>
+        <span class="prospect-name">${prospect ? escapeHtml(prospect) : (isUserPick ? 'Click to make your selection…' : 'Click to select prospect…')}</span>
         ${bio ? `<span class="prospect-bio">${escapeHtml(bio)}</span>` : ''}
       </div>
-      <div>${prospect ? `<button class="clear-btn" onclick="event.stopPropagation();clearPick(${p})" title="Clear selection">✕</button>` : ''}</div>
+      <div>${actionHtml}</div>
     </div>`;
   }
   boardEl.innerHTML = html;
@@ -2273,15 +2383,83 @@ function clearAllPicks() {
   renderDraftBoard();
 }
 
-function autoFillDefaults() {
-  // Fill every empty pick with the default prospect for that slot (if unclaimed)
+// ─── AI SIM FUNCTIONS (use cascading picker) ───
+
+// Fill a single pick using AI. Respects user team: if called on user's pick,
+// asks for confirmation before letting AI pick it.
+function simSinglePick(pickNum) {
+  if (STATE.selections[pickNum]) return;  // already filled
+  const slot = currentPickSlots[pickNum];
+  if (!slot) return;
+
+  // Safety: don't AI-pick for user's team without confirmation
+  if (STATE.userTeam && slot.team === STATE.userTeam) {
+    if (!confirm(`Pick #${pickNum} is your team's (${TEAM_FULL_NAME[STATE.userTeam] || STATE.userTeam}). Let the AI make this pick?`)) return;
+  }
+
   const taken = new Set(Object.values(STATE.selections).filter(Boolean));
-  for (const [slot, info] of Object.entries(currentPickSlots)) {
-    if (STATE.selections[slot]) continue;
-    const def = info.defaultProspect;
-    if (!def || taken.has(def)) continue;
-    STATE.selections[slot] = def;
-    taken.add(def);
+  const available = new Set(allProspects.filter(p => !taken.has(p)));
+  const result = computeCascadingPick(available);
+  if (!result) {
+    alert('No AI consensus available (out of data?).');
+    return;
+  }
+  STATE.selections[pickNum] = result.name;
+  saveState();
+  renderDraftBoard();
+}
+
+// Fill all picks from the lowest unfilled pick UP TO BUT NOT INCLUDING targetPick,
+// using the AI cascade. If a user-team pick is encountered along the way, it's
+// skipped (left empty) so the user can fill it manually.
+// In team mode: pauses before user's team picks.
+// In GM mode / no team: fills everything up to target (but still exclusive).
+function simUntilPick(targetPick) {
+  const pickNums = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
+  const taken = new Set(Object.values(STATE.selections).filter(Boolean));
+  let stoppedAtUserPick = null;
+
+  for (const p of pickNums) {
+    if (p >= targetPick) break;
+    if (STATE.selections[p]) continue;
+    const slot = currentPickSlots[p];
+    if (!slot) continue;
+
+    // Pause for user-team picks
+    if (STATE.userTeam && slot.team === STATE.userTeam) {
+      if (stoppedAtUserPick === null) stoppedAtUserPick = p;
+      continue;  // skip this pick, let user make it manually
+    }
+
+    const available = new Set(allProspects.filter(n => !taken.has(n)));
+    const result = computeCascadingPick(available);
+    if (!result) break;
+    STATE.selections[p] = result.name;
+    taken.add(result.name);
+  }
+
+  saveState();
+  renderDraftBoard();
+
+  if (stoppedAtUserPick !== null) {
+    // Scroll to the first user pick that needs attention
+    setTimeout(() => {
+      const el = document.querySelector(`[data-pick="${stoppedAtUserPick}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  }
+}
+
+// Auto-fill every pick using AI cascade. Used in GM mode (no team selected)
+// to spectate the full draft. Does NOT respect user team (none set).
+function autoFillAllAI() {
+  if (Object.keys(STATE.selections).length > 0) {
+    if (!confirm('Auto-fill will replace any existing selections with AI picks. Continue?')) return;
+  }
+  STATE.selections = {};
+  const full = simulateFullCascade(1, {});
+  for (const { pick, name } of full) {
+    STATE.selections[pick] = name;
   }
   saveState();
   renderDraftBoard();
