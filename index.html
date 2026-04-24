@@ -257,6 +257,22 @@
     margin-top: 2px;
   }
   .board-row.empty .prospect-name { color: var(--dim); font-style: italic; font-weight: 400; }
+
+  /* ── AI confidence cue: subtle left border tint on AI-picked rows.
+     User-team rows (gold) override this — their border stays gold. Only
+     non-user AI picks carry the confidence indicator. ── */
+  .board-row.drafted.conf-high:not(.user-team) {
+    border-left: 3px solid rgba(22,163,74,0.45);
+    padding-left: 13px;
+  }
+  .board-row.drafted.conf-mid:not(.user-team) {
+    border-left: 3px solid rgba(148,163,184,0.35);
+    padding-left: 13px;
+  }
+  .board-row.drafted.conf-low:not(.user-team) {
+    border-left: 3px solid rgba(234,88,12,0.55);
+    padding-left: 13px;
+  }
   .board-row .clear-btn {
     border: none;
     background: transparent;
@@ -1392,6 +1408,15 @@ let preLotteryOrder = [];       // team abbrevs in standings rank order (worst t
 let activeSources = [];         // [{ name, weight, colIdx }] sources present in CSV
 let sourceLists = {};           // source name -> [{name, rank}] sorted by that source's ranking
 
+// Trade system data (Phase 2c): roster + future picks + Real Values.
+// These are loaded lazily after main data — failures don't block boot,
+// but they disable the trade feature.
+let teamRosters = {};           // teamAbbrev -> [{name, position, salary, rat365}]
+let futurePickInventory = {};   // teamAbbrev -> [{round, year, sure, notes, id}] — 2027+
+let playerValues = {};          // playerName (lowercase) -> Real Value in $
+let slotPickValues = {};        // pickNum (1-60) -> derived Real Value in $
+let tradeDataReady = false;     // true once all trade data has loaded
+
 // Persistent mock-draft state (encoded in URL)
 let STATE = {
   phase: 'lottery',             // 'lottery' | 'draft'
@@ -1400,6 +1425,8 @@ let STATE = {
   lotteryResults: null,         // array of { pick, team, originalSlot } after lottery
   pickTransfers: [],            // array of { pick, from, to, label }
   selections: {},               // pickNum -> prospect name
+  confidences: {},              // pickNum -> 0-100 confidence (AI picks only)
+  trades: [],                   // array of applied trade records (Phase 2c)
 };
 
 let _pickerSlot = null;         // which slot is currently being selected
@@ -1426,6 +1453,125 @@ function parseCSV(text) {
   }
   if (cur.length > 1 || cur[0]) rows.push(cur);
   return rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  TRADE DATA LOADING (Phase 2c) — non-blocking
+//  Loads pick ownership (Sheet1 draft block), roster players + Real Values
+//  (Sheet1 roster block + /api/rv-snapshot). Failures here only disable the
+//  trade feature; the main app keeps working.
+// ═══════════════════════════════════════════════════════════════════
+
+async function loadTradeData() {
+  // 1. Pick ownership — our custom Worker endpoint returns pre-parsed JSON
+  try {
+    const r = await fetch('https://hoopsmatic.com/api/pick-ownership');
+    if (r.ok) {
+      const data = await r.json();
+      const ownership = data.ownership || {};
+      let count = 0;
+      // Convert city-keyed data to abbrev-keyed futurePickInventory (2027+ only)
+      for (const [city, picks] of Object.entries(ownership)) {
+        const abbrev = TEAMS[city];
+        if (!abbrev) continue;
+        if (!futurePickInventory[abbrev]) futurePickInventory[abbrev] = [];
+        for (let i = 0; i < picks.length; i++) {
+          const p = picks[i];
+          if (p.year === '2026') continue; // 2026 picks handled by currentPickSlots
+          futurePickInventory[abbrev].push({
+            id: `${abbrev}-${p.year}-${p.round}-${i}`,
+            round: p.round,
+            year: p.year,
+            sure: p.sure,
+            notes: p.notes,
+            ownerOriginal: abbrev, // for trade-tracking
+          });
+          count++;
+        }
+      }
+      console.log(`[DS Trade] Loaded ${count} future picks across ${Object.keys(futurePickInventory).length} teams`);
+    }
+  } catch (e) {
+    console.warn('[DS Trade] pick-ownership load failed:', e);
+  }
+
+  // 2. Roster data (Sheet1) — parse player list and build teamRosters
+  try {
+    const r = await fetch('https://hoopsmatic.com/api/rm-roster');
+    if (r.ok) {
+      const txt = await r.text();
+      const rows = parseCSV(txt);
+      let playerCount = 0;
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length < 12) continue;
+        const name = (row[0] || '').trim();
+        const cityOrAbbrev = (row[2] || '').trim();
+        if (!name || !cityOrAbbrev) continue;
+        const abbrev = TEAMS[cityOrAbbrev] || (cityOrAbbrev.length <= 3 ? cityOrAbbrev.toUpperCase() : null);
+        if (!abbrev) continue;
+        // Salaries may be "$30,666,666" — parse leniently
+        const salary2025 = parseMoney(row[3]);
+        const rat365 = parseFloat(row[11]) || 0;
+        const position = (row[26] || '').trim();
+        const age = (row[27] || '').trim();
+        if (!teamRosters[abbrev]) teamRosters[abbrev] = [];
+        teamRosters[abbrev].push({ name, position, age, salary: salary2025, rat365 });
+        playerCount++;
+      }
+      console.log(`[DS Trade] Loaded ${playerCount} players across ${Object.keys(teamRosters).length} teams`);
+    }
+  } catch (e) {
+    console.warn('[DS Trade] roster load failed:', e);
+  }
+
+  // 3. Real Values (rv-snapshot) — name → { tv } map
+  try {
+    const r = await fetch('https://hoopsmatic.com/api/rv-snapshot');
+    if (r.ok) {
+      const data = await r.json();
+      let count = 0;
+      for (const [key, val] of Object.entries(data)) {
+        if (key.startsWith('_')) continue;  // skip metadata (_date, _updated)
+        if (val && typeof val === 'object' && typeof val.tv === 'number') {
+          playerValues[key.toLowerCase()] = val.tv;
+          count++;
+        }
+      }
+      console.log(`[DS Trade] Loaded ${count} Real Values from rv-snapshot`);
+    }
+  } catch (e) {
+    console.warn('[DS Trade] rv-snapshot load failed:', e);
+  }
+
+  // 4. Derive slot-based pick values for 2026 picks 1-60.
+  // Pre-lottery each team's 2026 1st has a known RV in rv-snapshot (treated
+  // as a "player" with name "City 2026 1st" — but since picks aren't in
+  // rv-snapshot directly, we use a standard pick-value curve instead. This
+  // matches how trade charts work in practice.
+  //
+  // Rough curve: #1 ≈ $80M, decays to $2M by #30, ~$1M-$0 for 2nd round.
+  // These values are in the same $M units as player Real Value so trades
+  // can be valued apples-to-apples.
+  for (let p = 1; p <= 60; p++) {
+    if (p === 1) slotPickValues[p] = 80;
+    else if (p <= 3) slotPickValues[p] = 60 - (p - 1) * 8;
+    else if (p <= 10) slotPickValues[p] = 45 - (p - 3) * 3.5;
+    else if (p <= 20) slotPickValues[p] = 20 - (p - 10) * 1.2;
+    else if (p <= 30) slotPickValues[p] = 8 - (p - 20) * 0.5;
+    else if (p <= 45) slotPickValues[p] = 3 - (p - 30) * 0.1;
+    else slotPickValues[p] = Math.max(0.5, 1.5 - (p - 45) * 0.05);
+  }
+
+  tradeDataReady = true;
+}
+
+// Utility used by trade loader — tolerant money parser
+function parseMoney(s) {
+  if (!s) return 0;
+  const clean = String(s).replace(/[$,\s]/g, '');
+  const n = parseFloat(clean);
+  return isNaN(n) ? 0 : n;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2611,7 +2757,7 @@ function trackUserDraftPicks() {
   // which already understands tool:'rm', action:'draft', player, team, extra).
   // Using tool:'ds' tags them as Draft-Simulator-originated vs RM-originated.
   for (const { pick, player } of userPicks) {
-    fetch('/api/tracker', {
+    fetch('https://hoopsmatic.com/api/tracker', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3002,7 +3148,18 @@ function renderDraftBoard() {
     const promptText = prospect ? escapeHtml(prospect)
       : (isNextPick ? (isUserPick ? 'Click to make your selection…' : 'Click to select prospect…') : '');
 
-    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}${clickable ? ' clickable' : ''}" data-pick="${p}" ${clickable ? `onclick="openPicker(${p})"` : ''}>
+    // Subtle AI-confidence color cue: thin left-border indicator tinted
+    // green/neutral/amber based on how strong the scout consensus was.
+    // User picks keep their gold accent — no confidence class applied.
+    let confClass = '';
+    if (prospect && !isUserPick && STATE.confidences && STATE.confidences[p] != null) {
+      const c = STATE.confidences[p];
+      if (c >= 70) confClass = 'conf-high';
+      else if (c >= 40) confClass = 'conf-mid';
+      else confClass = 'conf-low';
+    }
+
+    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}${clickable ? ' clickable' : ''} ${confClass}" data-pick="${p}" ${clickable ? `onclick="openPicker(${p})"` : ''}>
       <div class="pick-col">#${p}</div>
       <div class="team-col">${teamBadge(slot.team)}</div>
       <div class="prospect-col">
@@ -3071,9 +3228,11 @@ function startFullSim() {
 
   // Step 2: run the full cascading draft across all picks
   STATE.selections = {};
+  STATE.confidences = {};
   const fullSim = simulateFullCascade(1, {});
-  for (const { pick, name } of fullSim) {
+  for (const { pick, name, confidence } of fullSim) {
     STATE.selections[pick] = name;
+    if (typeof confidence === 'number') STATE.confidences[pick] = confidence;
   }
 
   // Step 3: jump to draft-board view with everything filled in
@@ -3181,6 +3340,7 @@ function restartSimulation(opts) {
   STATE.lotteryResults = null;
   STATE.pickTransfers = [];
   STATE.selections = {};
+  STATE.confidences = {};
   STATE._recapShownOnce = false;
   STATE._trackedOnce = false;
   STATE._bannerDismissedAt = 0;
@@ -3261,6 +3421,8 @@ function selectProspect(name) {
   const slot = currentPickSlots[_pickerSlot];
   const isUserPick = STATE.userTeam && slot && slot.team === STATE.userTeam;
   STATE.selections[_pickerSlot] = name;
+  // User pick — no AI confidence to record. Clear any stale value.
+  if (STATE.confidences) delete STATE.confidences[_pickerSlot];
   closePicker();
   saveState();
   renderDraftBoard();
@@ -3331,6 +3493,7 @@ function simToNextUserPick() {
 function clearAllPicks() {
   if (!confirm('Clear all draft selections? Lottery results will be kept.')) return;
   STATE.selections = {};
+  STATE.confidences = {};
   STATE._recapShownOnce = false;
   STATE._trackedOnce = false;
   STATE._bannerDismissedAt = 0;
@@ -3360,6 +3523,8 @@ function simSinglePick(pickNum) {
     return;
   }
   STATE.selections[pickNum] = result.name;
+  if (!STATE.confidences) STATE.confidences = {};
+  STATE.confidences[pickNum] = result.confidence || 0;
   saveState();
   renderDraftBoard();
 }
@@ -3394,6 +3559,8 @@ function simUntilPick(targetPick) {
     const result = computeCascadingPick(available, p);
     if (!result) break;
     STATE.selections[p] = result.name;
+    if (!STATE.confidences) STATE.confidences = {};
+    STATE.confidences[p] = result.confidence || 0;
     taken.add(result.name);
   }
 
@@ -3419,9 +3586,11 @@ function autoFillAllAI() {
     if (!confirm('Auto-fill will replace any existing selections with AI picks. Continue?')) return;
   }
   STATE.selections = {};
+  STATE.confidences = {};
   const full = simulateFullCascade(1, {});
-  for (const { pick, name } of full) {
+  for (const { pick, name, confidence } of full) {
     STATE.selections[pick] = name;
+    if (typeof confidence === 'number') STATE.confidences[pick] = confidence;
   }
   saveState();
   renderDraftBoard();
@@ -3583,6 +3752,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     await loadData();
+    // Trigger trade-data load in background (non-blocking — failures just
+    // disable the trade feature, everything else keeps working)
+    loadTradeData().catch(e => console.warn('[DS] loadTradeData error:', e));
     // After data loaded, try restoring from URL
     loadStateFromURL();
     document.getElementById('status').style.display = 'none';
