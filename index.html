@@ -638,6 +638,55 @@
   .board-row.user-team.drafted {
     background: rgba(245,158,11,0.16);
   }
+
+  /* ── ON THE CLOCK: user's turn — louder visual treatment ── */
+  .board-row.on-the-clock {
+    background: linear-gradient(90deg, rgba(245,158,11,0.22) 0%, rgba(245,158,11,0.10) 60%);
+    border-left: 5px solid #f59e0b;
+    padding-left: 11px;  /* 16px - 5px border */
+    box-shadow: 0 0 0 1px rgba(245,158,11,0.45), 0 4px 16px rgba(245,158,11,0.18);
+    position: relative;
+  }
+  .board-row.on-the-clock:hover {
+    background: linear-gradient(90deg, rgba(245,158,11,0.30) 0%, rgba(245,158,11,0.14) 60%);
+  }
+  .board-row.on-the-clock .prospect-name {
+    color: var(--text);
+    font-style: normal;
+    font-weight: 600;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .board-row.on-the-clock .otc-badge {
+    display: inline-block;
+    background: #f59e0b;
+    color: #fff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .board-row.on-the-clock .otc-cta {
+    color: #b45309;
+    font-weight: 600;
+  }
+  /* Subtle pulse on the badge so the user's eye lands on it */
+  @keyframes otc-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.6); }
+    50%      { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+  }
+  .board-row.on-the-clock .otc-badge {
+    animation: otc-pulse 2s ease-in-out infinite;
+  }
+  /* Cursor-pointer on the whole row — already set by .clickable but reinforce */
+  .board-row.on-the-clock { cursor: pointer; }
   /* Lottery results row highlighting (GOLD) */
   .lottery-user-row {
     background: rgba(245,158,11,0.12) !important;
@@ -3521,8 +3570,13 @@ function renderDraftBoard() {
     // All other empty rows display blank (non-interactive) so users can't
     // select a prospect before earlier picks have been made.
     const clickable = !prospect && isNextPick;
+    // "On the clock" = user's turn AND it's the very next pick to be made.
+    // This drives a much louder visual treatment so users can't miss it.
+    const onTheClock = clickable && isUserPick;
     const promptText = prospect ? escapeHtml(prospect)
-      : (isNextPick ? (isUserPick ? 'Click to make your selection…' : 'Click to select prospect…') : '');
+      : onTheClock
+        ? '<span class="otc-badge">YOU\'RE ON THE CLOCK</span> <span class="otc-cta">Click to make your selection →</span>'
+        : (isNextPick ? 'Click to select prospect…' : '');
 
     // Subtle AI-confidence color cue: thin left-border indicator tinted
     // green/neutral/amber based on how strong the scout consensus was.
@@ -3535,7 +3589,7 @@ function renderDraftBoard() {
       else confClass = 'conf-low';
     }
 
-    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}${clickable ? ' clickable' : ''} ${confClass}" data-pick="${p}" ${clickable ? `onclick="openPicker(${p})"` : ''}>
+    html += `<div class="board-row ${prospect ? 'drafted' : 'empty'} ${isUserPick ? 'user-team' : ''}${clickable ? ' clickable' : ''}${onTheClock ? ' on-the-clock' : ''} ${confClass}" data-pick="${p}" ${clickable ? `onclick="openPicker(${p})"` : ''}>
       <div class="pick-col">#${p}</div>
       <div class="team-col">${teamBadge(slot.team)}</div>
       <div class="prospect-col">
@@ -3547,6 +3601,24 @@ function renderDraftBoard() {
   }
   boardEl.innerHTML = html;
   renderDraftRecap();
+
+  // Auto-scroll the user's "on-the-clock" row into view ONCE per turn.
+  // Without this, after a "Sim until your pick" run, the user might still
+  // be scrolled wherever the last AI pick happened — easy to miss the prompt.
+  // We track the last-scrolled pick to avoid yanking the page on every render.
+  const otcRow = boardEl.querySelector('.board-row.on-the-clock');
+  if (otcRow) {
+    const otcPick = parseInt(otcRow.getAttribute('data-pick'));
+    if (window._lastOnTheClockPick !== otcPick) {
+      window._lastOnTheClockPick = otcPick;
+      // Slight delay so layout settles after innerHTML swap
+      setTimeout(() => {
+        try { otcRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+      }, 60);
+    }
+  } else {
+    window._lastOnTheClockPick = null;
+  }
 }
 
 function escapeHtml(s) {
