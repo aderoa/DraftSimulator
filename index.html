@@ -3276,6 +3276,15 @@ async function downloadRecapImage() {
     // Brief settle so the browser commits the src changes
     await new Promise(r => setTimeout(r, 100));
 
+    // Temporarily clamp the panel to its actual content width so html2canvas
+    // captures only the meaningful pixels — not the full panel container which
+    // can be 1000+ px wide. The .recap-list cap is 720px so 760px (with the
+    // section's 16px L/R padding) is the natural content width.
+    const originalPanelWidth = panel.style.width;
+    const originalPanelMaxWidth = panel.style.maxWidth;
+    panel.style.width = '760px';
+    panel.style.maxWidth = '760px';
+
     const canvas = await html2canvas(panel, {
       backgroundColor: '#ffffff',
       scale: 2,
@@ -3283,6 +3292,10 @@ async function downloadRecapImage() {
       allowTaint: false,
       logging: false,
     });
+
+    // Restore panel width immediately after capture (before async toBlob)
+    panel.style.width = originalPanelWidth;
+    panel.style.maxWidth = originalPanelMaxWidth;
 
     if (canvas.width === 0 || canvas.height === 0) {
       throw new Error('Canvas is empty — rendering failed');
