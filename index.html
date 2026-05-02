@@ -336,7 +336,7 @@
   .picker-list { flex: 1; overflow-y: auto; padding: 8px; }
   .picker-item {
     display: grid;
-    grid-template-columns: 40px 1fr auto auto;
+    grid-template-columns: 40px 1fr auto;
     gap: 10px;
     padding: 8px 12px;
     border-radius: 6px;
@@ -348,50 +348,9 @@
   .picker-item.current { background: var(--accent-light); border: 1px solid rgba(234,88,12,0.3); }
   .picker-item.taken { opacity: 0.4; cursor: not-allowed; }
   .picker-item .rnk { color: var(--dim); font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; }
-  .picker-item .picker-main { min-width: 0; }
   .picker-item .name { font-weight: 600; }
   .picker-item .bio { color: var(--dim); font-size: 0.7rem; }
   .picker-item .taken-badge { font-size: 0.65rem; color: var(--muted); background: var(--bg); padding: 2px 6px; border-radius: 3px; }
-  /* Combine invitation badges — shown on every prospect row, with empty
-     placeholders kept for alignment when not invited. */
-  .picker-combines {
-    display: flex;
-    gap: 4px;
-    flex-direction: column;
-    align-items: stretch;
-    min-width: 110px;
-  }
-  .combine-badge {
-    font-size: 0.58rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 2px 6px;
-    border-radius: 3px;
-    text-align: center;
-    font-family: 'JetBrains Mono', monospace;
-    white-space: nowrap;
-  }
-  .combine-badge.dc-badge {
-    background: rgba(59, 130, 246, 0.12);
-    color: #1d4ed8;
-    border: 1px solid rgba(59, 130, 246, 0.3);
-  }
-  .combine-badge.gl-badge {
-    background: rgba(16, 185, 129, 0.12);
-    color: #047857;
-    border: 1px solid rgba(16, 185, 129, 0.3);
-  }
-  .combine-badge-empty {
-    height: 16px;  /* matches actual badge so alignment stays consistent */
-  }
-  @media (max-width: 600px) {
-    /* On mobile, drop combine column to a single horizontal row of mini-badges */
-    .picker-item { grid-template-columns: 32px 1fr auto; }
-    .picker-combines { flex-direction: row; min-width: 0; grid-column: 1 / -1; padding-left: 42px; padding-top: 2px; }
-    .combine-badge { font-size: 0.55rem; padding: 1px 5px; }
-    .combine-badge-empty { display: none; }
-  }
 
 
   /* ── Trade Machine iframe modal (Phase 2c) ── */
@@ -2001,9 +1960,15 @@ async function loadData() {
     pickSlots[pickPos] = { team: abbrev, defaultProspect: prospect };
   }
 
-  // Combine status (col 39 = DC, col 40 = GL) is captured for display, but
-  // combine-only players (no mock-draft entry) are NOT added to allProspects
-  // — they're not draftable in DS. This stays focused on ranked prospects.
+  // Combine-only players (invited to DC or GL but NOT in the mock-draft
+  // list) are added to allProspects so users can manually pick them. No
+  // rank data → AI cascading sim won't auto-select them, so they remain
+  // UDFA-eligible at draft's end. No combine badges shown in DS — that
+  // info lives in the Draft Predictor page.
+  const mockSet = new Set(prospects);
+  for (const name of Object.keys(combineStatusMap)) {
+    if (!mockSet.has(name)) prospects.push(name);
+  }
 
   allProspects = prospects;
   originalPickSlots = pickSlots;
@@ -3918,25 +3883,11 @@ function renderPicker(filter) {
     if (isTakenElsewhere) return;
     const cls = isCurrent ? 'current' : '';
     const bio = prospectBio(name);
-    const combine = combineStatusMap[name] || {};
-    // Two compact badges showing combine invitations. Empty placeholders keep
-    // alignment so all rows have the same column structure regardless of
-    // which combines a player attended.
-    const dcBadge = combine.dc
-      ? '<span class="combine-badge dc-badge" title="Draft Combine invitee">Draft Combine</span>'
-      : '<span class="combine-badge-empty"></span>';
-    const glBadge = combine.gl
-      ? '<span class="combine-badge gl-badge" title="G League Combine invitee">G League Combine</span>'
-      : '<span class="combine-badge-empty"></span>';
     html += `<div class="picker-item ${cls}" onclick="selectProspect('${escapeHtml(name).replace(/'/g,"\\'")}')">
       <span class="rnk">#${idx + 1}</span>
-      <div class="picker-main">
+      <div>
         <div class="name">${escapeHtml(name)}</div>
         ${bio ? `<div class="bio">${escapeHtml(bio)}</div>` : ''}
-      </div>
-      <div class="picker-combines">
-        ${dcBadge}
-        ${glBadge}
       </div>
       ${isCurrent ? '<span class="taken-badge" style="color:var(--orange)">current</span>' : ''}
     </div>`;
