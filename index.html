@@ -1395,13 +1395,10 @@
 
   <header>
     <h1 class="page-title-link" onclick="restartSimulation()" title="Click to start over">2026 NBA Draft Simulator</h1>
-    <p class="subtitle">Lottery, draft board, shareable mock drafts.</p>
+    <p class="subtitle">Draft board and shareable mock drafts.</p>
   </header>
 
-  <div class="phase-nav">
-    <button class="phase-tab active" data-phase="lottery">1. Lottery</button>
-    <button class="phase-tab" data-phase="draft">2. Draft Board</button>
-  </div>
+  <!-- Phase nav removed post-2026 lottery — draft board is the only remaining phase. -->
 
   <div id="share-box" class="share-box">
     <div><b>Share this mock draft:</b> <button class="btn small" onclick="hideShare()">Close</button></div>
@@ -1429,57 +1426,30 @@
     </div>
   </div>
 
-  <!-- ─── LOTTERY PHASE ─── -->
+  <!--
+    LOTTERY PHASE REMOVED — the real 2026 NBA Draft Lottery has happened and
+    picks 1-14 are now baked into the prospects spreadsheet (POS/TEAM columns).
+    The lottery JS (startLottery, renderLottery, runLottery, lottery-results
+    rendering, etc.) is left in place as dead code — kept for next year's draft
+    when we'll re-enable it, but unreferenced by any UI affordance.
+
+    Hidden empty containers below preserve any cached element-id lookups in
+    the lottery JS (defensive — prevents document.getElementById nulls from
+    throwing if a dead code path is somehow reached).
+  -->
   <div id="phase-lottery" style="display:none">
-
-    <div id="mode-select-wrap">
-      <div class="mode-select" id="mode-select">
-        <button class="mode-btn active" data-mode="quick">
-          <span class="mode-label">🎲 Quick Results</span>
-          <span class="mode-desc">Instant — just give me the results</span>
-        </button>
-        <button class="mode-btn" data-mode="tv">
-          <span class="mode-label">📺 TV Broadcast</span>
-          <span class="mode-desc">Deputy Commissioner reveals picks 14→1</span>
-        </button>
-        <button class="mode-btn" data-mode="drawroom">
-          <span class="mode-label">🎱 Draw Room</span>
-          <span class="mode-desc">Live ball drawing, combinations, redraws</span>
-        </button>
-      </div>
+    <div id="active-lottery" style="display:none">
+      <div id="active-lottery-title"></div>
+      <div id="active-lottery-body"></div>
     </div>
-
-    <div class="toolbar">
-      <button id="btn-run-lottery" class="btn primary" onclick="startLottery()">Run Lottery</button>
-      <button id="btn-rerun-lottery" class="btn" onclick="rerunLottery()" style="display:none">🎲 Re-run Lottery</button>
-      <button id="btn-continue-to-draft" class="btn primary" onclick="continueToDraft()" style="display:none">Continue to Draft Night →</button>
-      <div class="spacer"></div>
-      <span id="user-team-display-lottery"></span>
-      <button class="btn team-ctl-btn" id="btn-team-ctl-lottery" onclick="handleTeamCtlClick()">🏀 Select Team</button>
-      <button class="btn" onclick="showShare()">Share Link</button>
+    <div id="lottery-grid" style="display:none">
+      <div id="pre-lottery-table"></div>
+      <div id="lottery-results-table"></div>
     </div>
-
-    <!-- Active lottery UI (TV / Draw Room) renders here when running -->
-    <div id="active-lottery" class="panel" style="display:none">
-      <div class="panel-header" id="active-lottery-title">Lottery in Progress</div>
-      <div id="active-lottery-body" class="panel-body"></div>
+    <div id="transfers-panel" style="display:none">
+      <div id="transfers-list"></div>
     </div>
-
-    <div class="lottery-grid" id="lottery-grid">
-      <div class="panel">
-        <div class="panel-header">Pre-Lottery Standings (Worst → Best)</div>
-        <div id="pre-lottery-table"></div>
-      </div>
-      <div class="panel">
-        <div class="panel-header">Lottery Results</div>
-        <div id="lottery-results-table"></div>
-      </div>
-    </div>
-
-    <div id="transfers-panel" class="panel" style="display:none">
-      <div class="panel-header">Pick Protections & Transfers</div>
-      <div id="transfers-list" class="panel-body"></div>
-    </div>
+    <div id="user-team-display-lottery"></div>
   </div>
 
   <!-- ─── DRAFT BOARD PHASE ─── -->
@@ -1687,7 +1657,7 @@ let tradeDataReady = false;     // true once all trade data has loaded
 
 // Persistent mock-draft state (encoded in URL)
 let STATE = {
-  phase: 'lottery',             // 'lottery' | 'draft'
+  phase: 'draft',               // post-2026-lottery: only 'draft' is reachable
   lotteryMode: 'quick',         // 'quick' | 'tv' | 'drawroom'
   userTeam: null,               // team abbrev (e.g. 'POR') or null (no team selected)
   lotteryResults: null,         // array of { pick, team, originalSlot } after lottery
@@ -3689,7 +3659,8 @@ function introSelectTeam(abbrev) {
   hideIntroScreen();
   saveState();
   updateUserTeamDisplay();
-  setPhase('lottery');
+  // Post-2026-lottery: skip lottery phase entirely, picks come from spreadsheet
+  setPhase('draft');
 }
 
 // User clicked "Simulate the Entire Draft" — no team control, just spectate
@@ -3697,16 +3668,11 @@ function startFullSim() {
   STATE.userTeam = null;  // no team control
   hideIntroScreen();
 
-  // Step 1: run the lottery instantly (no animation)
-  const results = runLotterySimulation();
-  if (!results) {
-    alert('Not enough lottery teams loaded.');
-    return;
-  }
-  STATE.lotteryResults = results;
-  applyLotteryResults(results);
+  // Post-2026-lottery: skip lottery simulation. The 14 lottery picks have
+  // already been determined IRL and are baked into the spreadsheet — they're
+  // already in currentPickSlots / originalPickSlots from the initial load.
 
-  // Step 2: run the full cascading draft across all picks
+  // Run the full cascading draft across all picks
   STATE.selections = {};
   STATE.confidences = {};
   const fullSim = simulateFullCascade(1, {});
@@ -3715,7 +3681,7 @@ function startFullSim() {
     if (typeof confidence === 'number') STATE.confidences[pick] = confidence;
   }
 
-  // Step 3: jump to draft-board view with everything filled in
+  // Jump to draft-board view with everything filled in
   saveState();
   updateUserTeamDisplay();
   setPhase('draft');
@@ -3829,7 +3795,9 @@ function restartSimulation(opts) {
   _drawRoomState = null;
   if (_tvTimer) { clearInterval(_tvTimer); _tvTimer = null; }
   if (_drawTimer) { clearTimeout(_drawTimer); _drawTimer = null; }
-  setPhase('lottery');
+  // Post-2026-lottery: only draft phase exists. Restart returns to intro;
+  // the user picks a team and re-enters the draft.
+  setPhase('draft');
   saveState();
   showIntroScreen();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -4329,19 +4297,17 @@ function setLotteryMode(mode) {
 }
 
 function setPhase(phase) {
+  // Post-2026-lottery: lottery phase removed. Force any incoming 'lottery'
+  // value (from old saved state, old shared URLs) to 'draft' so the user
+  // doesn't get stuck on a hidden panel.
+  if (phase === 'lottery') phase = 'draft';
   STATE.phase = phase;
   document.querySelectorAll('.phase-tab').forEach(t =>
     t.classList.toggle('active', t.dataset.phase === phase));
-  document.getElementById('phase-lottery').style.display = phase === 'lottery' ? '' : 'none';
+  const lotteryEl = document.getElementById('phase-lottery');
+  if (lotteryEl) lotteryEl.style.display = 'none';
   document.getElementById('phase-draft').style.display = phase === 'draft' ? '' : 'none';
-  if (phase === 'lottery') {
-    // Sync mode buttons
-    document.querySelectorAll('.mode-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.mode === STATE.lotteryMode));
-    renderLottery();
-  } else {
-    renderDraftBoard();
-  }
+  renderDraftBoard();
   updateUserTeamDisplay();
   saveState();
 }
@@ -4384,7 +4350,7 @@ function decodeState(encoded) {
     const json = decodeURIComponent(escape(atob(padded)));
     const compact = JSON.parse(json);
 
-    STATE.phase = compact.p === 1 ? 'draft' : 'lottery';
+    STATE.phase = 'draft';  // post-2026-lottery: lottery phase removed, only draft remains
     STATE.lotteryMode = compact.m === 1 ? 'tv' : (compact.m === 2 ? 'drawroom' : 'quick');
     STATE.userTeam = compact.t || null;
     if (compact.l) {
@@ -4410,7 +4376,10 @@ function saveState() {
   const encoded = encodeState();
   // Use replaceState so we don't spam browser history
   const url = new URL(window.location.href);
-  if (encoded && encoded !== 'eyJwIjowfQ') {  // default empty state
+  // 'eyJwIjoxfQ' is base64 of {"p":1} — the default empty post-lottery state.
+  // (Was 'eyJwIjowfQ' = {"p":0} when lottery was phase 0; now draft is the
+  // only phase so empty state is p=1.)
+  if (encoded && encoded !== 'eyJwIjoxfQ') {
     url.hash = 's=' + encoded;
   } else {
     url.hash = '';
