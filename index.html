@@ -1470,6 +1470,7 @@
       <button class="btn team-ctl-btn" id="btn-team-ctl-draft" onclick="handleTeamCtlClick()">🏀 Select Team</button>
       <span id="draft-counter" style="font-family:'JetBrains Mono',monospace;font-size:0.8rem;color:var(--muted)"></span>
       <button class="btn" onclick="showShare()">Share Link</button>
+      <button class="btn" id="btn-copy-presto" onclick="copyPrestoCode()">📋 Copy Presto Code</button>
     </div>
 
     <!-- Dynamic floating banner. Content is set by renderDraftBoard based
@@ -4407,6 +4408,100 @@ function showShare() {
 
 function hideShare() {
   document.getElementById('share-box').classList.remove('visible');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PRESTO HTML EXPORT
+// ═══════════════════════════════════════════════════════════════════
+// Generates plain HTML suitable for pasting into Presto/HoopsHype articles.
+// No CSS classes; inline styles only (Presto strips classes). Format mirrors
+// the on-page "Draft Recap" but flattened for a CMS-friendly structure.
+
+function generatePrestoHtml() {
+  const picks = Object.keys(currentPickSlots).map(Number).sort((a, b) => a - b);
+  const filled = picks.filter(p => STATE.selections[p]);
+  if (!filled.length) return '';
+
+  // Acquired-from map for in-line "traded from" annotations
+  const acquiredFrom = (typeof buildAcquiredPickMap === 'function') ? buildAcquiredPickMap() : {};
+
+  let out = '<div style="font-family:sans-serif;max-width:700px;margin:0 auto">\n';
+
+  // Intro paragraph
+  out += '  <p style="margin:0 0 1em">The draft order is set after the lottery, and the Wizards are officially on the clock with the first pick. Beyond that, every front office is gathering information and working prospects out to figure out the best options for their rosters. Combining the most reliable mock drafts and workout information, we\u2019ve created a Draft Simulator to determine how the 2026 NBA Draft landscape looks right now. Here are the results:</p>\n';
+
+  let inRoundTwo = false;
+  out += '  <h3 style="margin:1.2em 0 .3em;font-size:1.15em;border-bottom:2px solid #b45309;padding-bottom:.15em">First Round</h3>\n';
+  out += '  <ol style="margin:.3em 0 1em 0;padding-left:1.5em">\n';
+
+  for (const p of filled) {
+    if (!inRoundTwo && p > 30) {
+      out += '  </ol>\n';
+      out += '  <h3 style="margin:1.2em 0 .3em;font-size:1.15em;border-bottom:2px solid #b45309;padding-bottom:.15em">Second Round</h3>\n';
+      out += '  <ol start="31" style="margin:.3em 0 1em 0;padding-left:1.5em">\n';
+      inRoundTwo = true;
+    }
+    const slot = currentPickSlots[p];
+    const team = slot ? slot.team : '';
+    const teamName = (typeof TEAM_FULL_NAME !== 'undefined' && TEAM_FULL_NAME[team]) || team;
+    const name = STATE.selections[p];
+    const bio = (typeof prospectBio === 'function') ? prospectBio(name) : '';
+    const fromTeam = acquiredFrom[p];
+    const fromName = fromTeam ? ((typeof TEAM_FULL_NAME !== 'undefined' && TEAM_FULL_NAME[fromTeam]) || fromTeam) : '';
+    const acquiredTxt = fromTeam ? ` <span style="color:#666;font-size:.85em">(via ${escapeHtml(fromName)})</span>` : '';
+    const bioTxt = bio ? ` <span style="color:#666;font-size:.9em">(${escapeHtml(bio)})</span>` : '';
+    out += `    <li style="margin:.2em 0"><strong>${escapeHtml(teamName)}</strong>: ${escapeHtml(name)}${bioTxt}${acquiredTxt}</li>\n`;
+  }
+  out += '  </ol>\n';
+  out += '</div>';
+  return out;
+}
+
+function copyPrestoCode() {
+  const btn = document.getElementById('btn-copy-presto');
+  if (!btn) return;
+  const code = generatePrestoHtml();
+  if (!code) {
+    flashPrestoBtn(btn, 'Nothing to copy', false);
+    return;
+  }
+  const finishOk = () => flashPrestoBtn(btn, '\u2713 Copied!', true);
+  const finishErr = () => prestoFallbackCopy(code, btn);
+  const blob = new Blob([code], { type: 'text/plain' });
+  if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+    navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob })])
+      .then(finishOk).catch(finishErr);
+  } else if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(code).then(finishOk).catch(finishErr);
+  } else {
+    finishErr();
+  }
+}
+
+function prestoFallbackCopy(text, btn) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.top = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    flashPrestoBtn(btn, '\u2713 Copied!', true);
+  } catch (e) {
+    flashPrestoBtn(btn, 'Copy failed', false);
+  }
+  document.body.removeChild(ta);
+}
+
+function flashPrestoBtn(btn, msg, success) {
+  const original = '\ud83d\udccb Copy Presto Code';
+  btn.textContent = msg;
+  if (success) btn.style.background = 'var(--accent)';
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.style.background = '';
+  }, 1800);
 }
 
 // ═══════════════════════════════════════════════════════════════════
